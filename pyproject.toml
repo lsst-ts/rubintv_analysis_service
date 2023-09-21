@@ -30,12 +30,18 @@ dependencies = [
     "scipy",
     "matplotlib",
     "pydantic",
-    "pyyaml"
+    "pyyaml",
+    "sqlalchemy",
+    "astropy",
+    "websocket-client",
+    "lsst-daf-butler",
+    # temporary dependency for testing
+    "tornado",
 ]
 #dynamic = ["version"]
 
 [project.urls]
-"Homepage" = "https://github.com/lsst/rubintv_analysis_service"
+"Homepage" = "https://github.com/lsst-ts/rubintv_analysis_service"
 
 [project.optional-dependencies]
 test = [
@@ -65,9 +71,6 @@ line_length = 110
 [tool.lsst_versions]
 write_to = "python/lsst/rubintv/analysis/service/version.py"
 
-[tool.pytest.ini_options]
-addopts = "--flake8"
-flake8-ignore = ["W503", "E203"]
 # The matplotlib test may not release font files.
 open_files_ignore = ["*.ttf"]
 
