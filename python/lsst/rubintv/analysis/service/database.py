@@ -266,6 +266,25 @@ class CalculateBoundsCommand(BaseCommand):
         }
 
 
+@dataclass(kw_only=True)
+class LoadSchemaCommand(BaseCommand):
+    """Load the schema for a database.
+
+    Attributes
+    ----------
+    database :
+        The name of the database that the table is in.
+    """
+
+    database: str
+    response_type: str = "database schema"
+
+    def build_contents(self, databases: dict[str, DatabaseConnection], butler: Butler | None) -> dict:
+        database = databases[self.database]
+        return database.schema
+
+
 # Register the commands
 LoadColumnsCommand.register("load columns")
 CalculateBoundsCommand.register("get bounds")
+LoadSchemaCommand.register("load schema");
