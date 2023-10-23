@@ -123,23 +123,24 @@ class ParentQuery(Query):
     """
 
     def __init__(self, children: list[Query], operator: str):
-        self.children = children
-        self.operator = operator
+        self._children = children
+        self._operator = operator
 
     def __call__(self, table: sqlalchemy.Table) -> sqlalchemy.sql.elements.BooleanClauseList:
-        child_results = [child(table) for child in self.children]
+        child_results = [child(table) for child in self._children]
         try:
-            if self.operator == "AND":
-                return sqlalchemy.and_(*child_results)
-            if self.operator == "OR":
-                return sqlalchemy.or_(*child_results)
-            if self.operator == "NOT":
-                return sqlalchemy.not_(*child_results)
-            if self.operator == "XOR":
-                return sqlalchemy.and_(
-                    sqlalchemy.or_(*child_results),
-                    sqlalchemy.not_(sqlalchemy.and_(*child_results)),
-                )
+            match self._operator:
+                case "AND":
+                    return sqlalchemy.and_(*child_results)
+                case "OR":
+                    return sqlalchemy.or_(*child_results)
+                case "NOT":
+                    return sqlalchemy.not_(*child_results)
+                case "XOR":
+                    return sqlalchemy.and_(
+                        sqlalchemy.or_(*child_results),
+                        sqlalchemy.not_(sqlalchemy.and_(*child_results)),
+                    )
         except Exception:
             raise QueryError("Error applying a boolean query statement.")
 

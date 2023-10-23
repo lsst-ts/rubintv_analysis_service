@@ -24,7 +24,7 @@ import os
 import pathlib
 
 import yaml
-from lsst.rubintv.analysis.service.client import run_worker
+from lsst.rubintv.analysis.service.client import Worker
 
 default_config = os.path.join(pathlib.Path(__file__).parent.absolute(), "config.yaml")
 
@@ -47,7 +47,8 @@ def main():
         config = yaml.safe_load(file)
 
     # Run the client and connect to rubinTV via websockets
-    run_worker(args.address, args.port, config)
+    worker = Worker(args.address, args.port, config)
+    worker.run()
 
 
 if __name__ == "__main__":

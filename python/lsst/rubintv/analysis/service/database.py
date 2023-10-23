@@ -219,7 +219,7 @@ class LoadColumnsCommand(BaseCommand):
             engine=database.engine,
         )
 
-        if len(data) == 0:
+        if not data:
             # There is no column data to return
             content: dict = {
                 "columns": columns,

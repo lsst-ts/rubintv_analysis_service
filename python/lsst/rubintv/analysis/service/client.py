@@ -26,56 +26,64 @@ from lsst.daf.butler import Butler
 from websocket import WebSocketApp
 
 from .command import DatabaseConnection, execute_command
+from .utils import printc, Colors
 
 logger = logging.getLogger("lsst.rubintv.analysis.service.client")
 
 
-def on_error(ws: WebSocketApp, error: str) -> None:
-    """Error received from the server."""
-    print(f"\033[91mError: {error}\033[0m")
+class Worker:
+    def __init__(self, address: str, port: int, connection_info: dict[str, dict]):
+        self._address = address
+        self._port = port
+        self._connection_info = connection_info
 
+    def on_error(self, ws: WebSocketApp, error: str) -> None:
+        """Error received from the server."""
+        printc(f"Error: {error}", color=Colors.BRIGHT_RED)
 
-def on_close(ws: WebSocketApp, close_status_code: str, close_msg: str) -> None:
-    """Connection closed by the server."""
-    print("\033[93mConnection closed\033[0m")
+    def on_close(self, ws: WebSocketApp, close_status_code: str, close_msg: str) -> None:
+        """Connection closed by the server."""
+        printc("Connection closed", Colors.BRIGHT_YELLOW)
 
+    def run(self) -> None:
+        """Run the worker and connect to the rubinTV server.
 
-def run_worker(address: str, port: int, connection_info: dict[str, dict]) -> None:
-    """Run the worker and connect to the rubinTV server.
+        Parameters
+        ----------
+        address :
+            Address of the rubinTV web app.
+        port :
+            Port of the rubinTV web app websockets.
+        connection_info :
+            Connections .
+        """
+        # Load the database connection information
+        databases: dict[str, DatabaseConnection] = {}
 
-    Parameters
-    ----------
-    address :
-        Address of the rubinTV web app.
-    port :
-        Port of the rubinTV web app websockets.
-    connection_info :
-        Connections .
-    """
-    # Load the database connection information
-    databases: dict[str, DatabaseConnection] = {}
+        for name, info in self._connection_info["databases"].items():
+            with open(info["schema"], "r") as file:
+                engine = sqlalchemy.create_engine(info["url"])
+                schema = yaml.safe_load(file)
+                databases[name] = DatabaseConnection(schema=schema, engine=engine)
 
-    for name, info in connection_info["databases"].items():
-        with open(info["schema"], "r") as file:
-            engine = sqlalchemy.create_engine(info["url"])
-            schema = yaml.safe_load(file)
-            databases[name] = DatabaseConnection(schema=schema, engine=engine)
+        # Load the Butler (if one is available)
+        butler: Butler | None = None
+        if "butler" in self._connection_info:
+            repo = self._connection_info["butler"].pop("repo")
+            butler = Butler(repo, **self._connection_info["butler"])
 
-    # Load the Butler (if one is available)
-    butler: Butler | None = None
-    if "butler" in connection_info:
-        repo = connection_info["butler"].pop("repo")
-        butler = Butler(repo, **connection_info["butler"])
+        def on_message(ws: WebSocketApp, message: str) -> None:
+            """Message received from the server."""
+            response = execute_command(message, databases, butler)
+            ws.send(response)
 
-    def on_message(ws: WebSocketApp, message: str) -> None:
-        """Message received from the server."""
-        response = execute_command(message, databases, butler)
-        ws.send(response)
-
-    print(f"\033[92mConnecting to rubinTV at {address}:{port}\033[0m")
-    # Connect to the WebSocket server
-    ws = WebSocketApp(
-        f"ws://{address}:{port}/ws/worker", on_message=on_message, on_error=on_error, on_close=on_close
-    )
-    ws.run_forever()
-    ws.close()
+        printc(f"Connecting to rubinTV at {self._address}:{self._port}", Colors.BRIGHT_GREEN)
+        # Connect to the WebSocket server
+        ws = WebSocketApp(
+            f"ws://{self._address}:{self._port}/ws/worker",
+            on_message=on_message,
+            on_error=self.on_error,
+            on_close=self.on_close,
+        )
+        ws.run_forever()
+        ws.close()

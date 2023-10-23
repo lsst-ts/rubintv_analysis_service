@@ -141,6 +141,7 @@ class BaseCommand(ABC):
         This should be unique for each command.
     """
 
+    command_registry = {}
     result: dict | None = None
     response_type: str
 
@@ -153,7 +154,7 @@ class BaseCommand(ABC):
         databases :
             The database connections.
         butler :
-            A conencted Butler.
+            A connected Butler.
 
         Returns
         -------
@@ -187,11 +188,7 @@ class BaseCommand(ABC):
     @classmethod
     def register(cls, name: str):
         """Register a command."""
-        command_registry[name] = cls
-
-
-# Registry of all commands
-command_registry = {}
+        BaseCommand.command_registry[name] = cls
 
 
 def execute_command(command_str: str, databases: dict[str, DatabaseConnection], butler: Butler | None) -> str:
@@ -212,7 +209,7 @@ def execute_command(command_str: str, databases: dict[str, DatabaseConnection], 
     databases :
         The database connections.
     butler :
-        A conencted Butler.
+        A connected Butler.
     """
     try:
         command_dict = json.loads(command_str)
@@ -226,15 +223,11 @@ def execute_command(command_str: str, databases: dict[str, DatabaseConnection], 
         if "name" not in command_dict.keys():
             raise CommandParsingError("No command 'name' given")
 
-        if command_dict["name"] not in command_registry.keys():
+        if command_dict["name"] not in BaseCommand.command_registry.keys():
             raise CommandParsingError(f"Unrecognized command '{command_dict['name']}'")
 
-        if "parameters" in command_dict:
-            parameters = command_dict["parameters"]
-        else:
-            parameters = {}
-
-        command = command_registry[command_dict["name"]](**parameters)
+        parameters = command_dict.get("parameters", {})
+        command = BaseCommand.command_registry[command_dict["name"]](**parameters)
 
     except Exception as err:
         logging.exception("Error parsing command.")
