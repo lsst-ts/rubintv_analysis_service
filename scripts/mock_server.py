@@ -29,8 +29,7 @@ import tornado.httpserver
 import tornado.ioloop
 import tornado.web
 import tornado.websocket
-
-from lsst.rubintv.analysis.service.utils import printc, Colors
+from lsst.rubintv.analysis.service.utils import Colors, printc
 
 # Default port and address to listen on
 LISTEN_PORT = 2000

@@ -26,7 +26,7 @@ from lsst.daf.butler import Butler
 from websocket import WebSocketApp
 
 from .command import DatabaseConnection, execute_command
-from .utils import printc, Colors
+from .utils import Colors, printc
 
 logger = logging.getLogger("lsst.rubintv.analysis.service.client")
 
