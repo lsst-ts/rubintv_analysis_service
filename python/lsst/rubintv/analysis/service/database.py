@@ -129,7 +129,10 @@ def query_table(
     if columns is None:
         _query = _table.select()
     else:
-        _query = sqlalchemy.select(*column_names_to_models(_table, columns))
+        columnModels = column_names_to_models(_table, columns)
+        non_null_conditions = sqlalchemy.and_(*[col.isnot(None) for col in columnModels])
+        _query = sqlalchemy.select(*columnModels)
+        _query = _query.where(non_null_conditions)
 
     if query is not None:
         _query = _query.where(Query.from_dict(query)(_table))

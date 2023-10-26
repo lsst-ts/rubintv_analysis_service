@@ -179,10 +179,12 @@ class BaseCommand(ABC):
         """
         self.result = {"type": self.response_type, "content": self.build_contents(databases, butler)}
 
-    def to_json(self):
+    def to_json(self, requestId: str|None = None):
         """Convert the `result` into JSON."""
         if self.result is None:
             raise CommandExecutionError(f"Null result for command {self.__class__.__name__}")
+        if requestId is not None:
+            self.result["requestId"] = requestId
         return json.dumps(self.result)
 
     @classmethod
@@ -211,6 +213,7 @@ def execute_command(command_str: str, databases: dict[str, DatabaseConnection], 
     butler :
         A connected Butler.
     """
+    print("command string: ", command_str)
     try:
         command_dict = json.loads(command_str)
         if not isinstance(command_dict, dict):
@@ -240,7 +243,10 @@ def execute_command(command_str: str, databases: dict[str, DatabaseConnection], 
         return error_msg(CommandExecutionError(f"{err} error executing command."))
 
     try:
-        result = command.to_json()
+        if "requestId" in command_dict:
+            result = command.to_json(command_dict["requestId"])
+        else:
+            result = command.to_json()
     except Exception as err:
         logging.exception("Error converting command response to JSON.")
         return error_msg(CommandResponseError(f"{err} error converting command response to JSON."))
