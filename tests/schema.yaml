@@ -1,0 +1,42 @@
+---
+name: testdb
+"@id": "#test_db"
+description: Small database for testing the package
+tables:
+  - name: ExposureInfo
+    index_column: exposure_id
+    columns:
+      - name: exposure_id
+        datatype: long
+        description: Unique identifier of an exposure.
+      - name: seq_num
+        datatype: long
+        description: Sequence number
+      - name: ra
+        datatype: double
+        unit: degree
+        description: RA of focal plane center.
+      - name: dec
+        datatype: double
+        unit: degree
+        description: Declination of focal plane center
+      - name: expTime
+        datatype: double
+        description: Spatially-averaged duration of exposure, accurate to 10ms.
+      - name: physical_filter
+        datatype: char
+        description: ID of physical filter,
+          the filter associated with a particular instrument.
+      - name: obsNight
+        datatype: date
+        description: The night of the observation. This is different than the
+          observation date, as this is the night that the observations started,
+          so for observations after midnight obsStart and obsNight will be
+          different days.
+      - name: obsStart
+        datatype: datetime
+        description: Start time of the exposure at the fiducial center
+          of the focal plane array, TAI, accurate to 10ms.
+      - name: obsStartMJD
+        datatype: double
+        description: Start of the exposure in MJD, TAI, accurate to 10ms.

@@ -1,0 +1,8 @@
+---
+databases:
+  summitcdb:
+    schema: "/Users/fred3m/temp/visitDb/summit.yaml"
+    url: "sqlite:////Users/fred3m/temp/visitDb/summit.db"
+#butler:
+#  repo: /repos/main
+#  skymap: hsc_rings_v1

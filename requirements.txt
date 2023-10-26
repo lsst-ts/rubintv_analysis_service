@@ -1,0 +1,12 @@
+numpy>=1.25.2
+scipy
+matplotlib
+pydantic
+pyyaml
+sqlalchemy
+astropy
+websocket-client
+lsst-daf-butler
+
+# the following import is temporary while testing
+tornado
