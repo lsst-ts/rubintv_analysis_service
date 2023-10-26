@@ -66,7 +66,7 @@ class Query(ABC):
             elif query_dict["name"] == "ParentQuery":
                 return ParentQuery.from_dict(query_dict["content"])
         except Exception:
-            raise QueryError("Failed to parse query.")
+            raise QueryError(f"Failed to parse query: {query_dict}")
 
         raise QueryError("Unrecognized query type")
 
