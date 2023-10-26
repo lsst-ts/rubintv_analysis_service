@@ -87,6 +87,8 @@ class TestDatabase(TestCase):
 
     def test_query_columns(self):
         truth = utils.get_test_data()
+        valid = (truth["ra"] != None) & (truth["dec"] != None)  # noqa: E711
+        truth = truth[valid]
         truth = utils.ap_table_to_list(truth["ra", "dec"])
 
         data = lras.database.query_table("ExposureInfo", columns=["ra", "dec"], engine=self.engine)

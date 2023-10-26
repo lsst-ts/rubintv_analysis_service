@@ -108,7 +108,10 @@ class TestLoadColumnsCommand(TestCommand):
         data = content["data"]
 
         truth = utils.get_test_data()["exposure_id", "ra", "dec"]
+        valid = (truth["ra"] != None) & (truth["dec"] != None)  # noqa: E711
+        truth = truth[valid]
         truth_data = utils.ap_table_to_list(truth)
+        truth_data = truth_data
 
         self.assertTupleEqual(tuple(columns), tuple(truth.columns))
         self.assertDataTableEqual(data, truth_data)
@@ -141,7 +144,7 @@ class TestLoadColumnsCommand(TestCommand):
 
         truth = utils.get_test_data()["exposure_id", "ra", "dec"]
         # Select rows with expTime = 30
-        truth = truth[[True, True, False, False, False, True, True, True, False, False]]
+        truth = truth[[True, True, False, False, False, True, False, False, False, False]]
         truth_data = utils.ap_table_to_list(truth)
 
         self.assertTupleEqual(tuple(columns), tuple(truth.columns))

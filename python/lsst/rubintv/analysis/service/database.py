@@ -290,4 +290,4 @@ class LoadSchemaCommand(BaseCommand):
 # Register the commands
 LoadColumnsCommand.register("load columns")
 CalculateBoundsCommand.register("get bounds")
-LoadSchemaCommand.register("load schema");
+LoadSchemaCommand.register("load schema")

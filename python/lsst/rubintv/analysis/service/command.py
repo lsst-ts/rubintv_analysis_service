@@ -179,7 +179,7 @@ class BaseCommand(ABC):
         """
         self.result = {"type": self.response_type, "content": self.build_contents(databases, butler)}
 
-    def to_json(self, requestId: str|None = None):
+    def to_json(self, requestId: str | None = None):
         """Convert the `result` into JSON."""
         if self.result is None:
             raise CommandExecutionError(f"Null result for command {self.__class__.__name__}")
