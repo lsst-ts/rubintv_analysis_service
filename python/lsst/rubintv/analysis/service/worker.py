@@ -20,22 +20,28 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import logging
 
-import sqlalchemy
-import yaml
-from lsst.daf.butler import Butler
 from websocket import WebSocketApp
 
-from .command import DatabaseConnection, execute_command
+from .command import execute_command
+from .command import DataCenter
 from .utils import Colors, printc
 
 logger = logging.getLogger("lsst.rubintv.analysis.service.client")
 
 
 class Worker:
-    def __init__(self, address: str, port: int, connection_info: dict[str, dict]):
+    _address: str
+    _port: int
+    _dataCenter: DataCenter
+
+    def __init__(self, address: str, port: int, dataCenter: DataCenter):
         self._address = address
         self._port = port
-        self._connection_info = connection_info
+        self._dataCenter = dataCenter
+
+    @property
+    def dataCenter(self) -> DataCenter:
+        return self._dataCenter
 
     def on_error(self, ws: WebSocketApp, error: str) -> None:
         """Error received from the server."""
@@ -57,24 +63,10 @@ class Worker:
         connection_info :
             Connections .
         """
-        # Load the database connection information
-        databases: dict[str, DatabaseConnection] = {}
-
-        for name, info in self._connection_info["databases"].items():
-            with open(info["schema"], "r") as file:
-                engine = sqlalchemy.create_engine(info["url"])
-                schema = yaml.safe_load(file)
-                databases[name] = DatabaseConnection(schema=schema, engine=engine)
-
-        # Load the Butler (if one is available)
-        butler: Butler | None = None
-        if "butler" in self._connection_info:
-            repo = self._connection_info["butler"].pop("repo")
-            butler = Butler(repo, **self._connection_info["butler"])
 
         def on_message(ws: WebSocketApp, message: str) -> None:
             """Message received from the server."""
-            response = execute_command(message, databases, butler)
+            response = execute_command(message, self.dataCenter)
             ws.send(response)
 
         printc(f"Connecting to rubinTV at {self._address}:{self._port}", Colors.BRIGHT_GREEN)

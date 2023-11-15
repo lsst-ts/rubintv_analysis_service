@@ -21,11 +21,15 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import operator as op
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import sqlalchemy
+
+if TYPE_CHECKING:
+    from .database import DatabaseConnection
 
 
 class QueryError(Exception):
@@ -34,11 +38,17 @@ class QueryError(Exception):
     pass
 
 
+@dataclass
+class QueryResult:
+    result: sqlalchemy.ColumnElement
+    tables: set[str]
+
+
 class Query(ABC):
     """Base class for constructing queries."""
 
     @abstractmethod
-    def __call__(self, table: sqlalchemy.Table) -> sqlalchemy.sql.elements.BooleanClauseList:
+    def __call__(self, database: DatabaseConnection) -> QueryResult:
         """Run the query on a table.
 
         Parameters
@@ -94,9 +104,8 @@ class EqualityQuery(Query):
         self.column = column
         self.value = value
 
-    def __call__(self, table: sqlalchemy.Table) -> sqlalchemy.sql.elements.BooleanClauseList:
-        column = table.columns[self.column]
-
+    def __call__(self, database: DatabaseConnection) -> QueryResult:
+        table, column = self.column.split(".")
         if self.operator in ("eq", "ne", "lt", "le", "gt", "ge"):
             operator = getattr(op, self.operator)
             return operator(column, self.value)
@@ -104,7 +113,7 @@ class EqualityQuery(Query):
         if self.operator not in ("startswith", "endswith", "contains"):
             raise QueryError(f"Unrecognized Equality operator {self.operator}")
 
-        return getattr(column, self.operator)(self.value)
+        return QueryResult(getattr(column, self.operator)(self.value), set(table))
 
     @staticmethod
     def from_dict(query_dict: dict[str, Any]) -> EqualityQuery:
@@ -126,20 +135,29 @@ class ParentQuery(Query):
         self._children = children
         self._operator = operator
 
-    def __call__(self, table: sqlalchemy.Table) -> sqlalchemy.sql.elements.BooleanClauseList:
-        child_results = [child(table) for child in self._children]
+    def __call__(self, database: DatabaseConnection) -> QueryResult | None:
+        child_results = []
+        tables = set()
+        for child in self._children:
+            result = child(database)
+            child_results.append(result.result)
+            tables.update(result.tables)
+
         try:
             match self._operator:
                 case "AND":
-                    return sqlalchemy.and_(*child_results)
+                    return QueryResult(sqlalchemy.and_(*child_results), tables)
                 case "OR":
-                    return sqlalchemy.or_(*child_results)
+                    return QueryResult(sqlalchemy.or_(*child_results), tables)
                 case "NOT":
-                    return sqlalchemy.not_(*child_results)
+                    return QueryResult(sqlalchemy.not_(*child_results), tables)
                 case "XOR":
-                    return sqlalchemy.and_(
-                        sqlalchemy.or_(*child_results),
-                        sqlalchemy.not_(sqlalchemy.and_(*child_results)),
+                    return QueryResult(
+                        sqlalchemy.and_(
+                            sqlalchemy.or_(*child_results),
+                            sqlalchemy.not_(sqlalchemy.and_(*child_results)),
+                        ),
+                        tables,
                     )
         except Exception:
             raise QueryError("Error applying a boolean query statement.")

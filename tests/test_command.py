@@ -24,6 +24,7 @@ import os
 import tempfile
 
 import lsst.rubintv.analysis.service as lras
+import lsst.rubintv.analysis.service.database
 import sqlalchemy
 import utils
 import yaml
@@ -44,7 +45,7 @@ class TestCommand(utils.RasTestCase):
 
         # Load the database connection information
         self.databases = {
-            "testdb": lras.command.DatabaseConnection(
+            "testdb": lsst.rubintv.analysis.service.database.DatabaseConnection(
                 schema=schema, engine=sqlalchemy.create_engine("sqlite:///" + db_file.name)
             )
         }

@@ -24,8 +24,7 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-import sqlalchemy
-from lsst.daf.butler import Butler
+from .data import DataCenter
 
 logger = logging.getLogger("lsst.rubintv.analysis.service.command")
 
@@ -111,22 +110,6 @@ class CommandResponseError(Exception):
     pass
 
 
-@dataclass
-class DatabaseConnection:
-    """A connection to a database.
-
-    Attributes
-    ----------
-    engine :
-        The engine used to connect to the database.
-    schema :
-        The schema for the database.
-    """
-
-    engine: sqlalchemy.engine.Engine
-    schema: dict
-
-
 @dataclass(kw_only=True)
 class BaseCommand(ABC):
     """Base class for commands.
@@ -146,15 +129,14 @@ class BaseCommand(ABC):
     response_type: str
 
     @abstractmethod
-    def build_contents(self, databases: dict[str, DatabaseConnection], butler: Butler | None) -> dict:
+    def build_contents(self, dataCenter: DataCenter) -> dict:
         """Build the contents of the command.
 
         Parameters
         ----------
-        databases :
-            The database connections.
-        butler :
-            A connected Butler.
+        dataCenter :
+            The `~DataCenter` containing connections to databases, the Butler,
+            and the EfdClient.
 
         Returns
         -------
@@ -163,7 +145,7 @@ class BaseCommand(ABC):
         """
         pass
 
-    def execute(self, databases: dict[str, DatabaseConnection], butler: Butler | None):
+    def execute(self, dataCenter: DataCenter):
         """Execute the command.
 
         This method does not return anything, buts sets the `result`,
@@ -177,7 +159,7 @@ class BaseCommand(ABC):
             A conencted Butler.
 
         """
-        self.result = {"type": self.response_type, "content": self.build_contents(databases, butler)}
+        self.result = {"type": self.response_type, "content": self.build_contents(dataCenter)}
 
     def to_json(self, requestId: str | None = None):
         """Convert the `result` into JSON."""
@@ -193,7 +175,7 @@ class BaseCommand(ABC):
         BaseCommand.command_registry[name] = cls
 
 
-def execute_command(command_str: str, databases: dict[str, DatabaseConnection], butler: Butler | None) -> str:
+def execute_command(command_str: str, dataCenter: DataCenter) -> str:
     """Parse a JSON formatted string into a command and execute it.
 
     Command format:
@@ -237,7 +219,7 @@ def execute_command(command_str: str, databases: dict[str, DatabaseConnection], 
         return error_msg(CommandParsingError(f"'{err}' error while parsing command"))
 
     try:
-        command.execute(databases, butler)
+        command.execute(dataCenter)
     except Exception as err:
         logging.exception("Error executing command.")
         return error_msg(CommandExecutionError(f"{err} error executing command."))

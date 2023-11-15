@@ -19,11 +19,18 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import os
+import sqlalchemy
 import sqlite3
+import tempfile
 from unittest import TestCase
+import yaml
 
 from astropy.table import Table as ApTable
 from astropy.time import Time
+
+from lsst.rubintv.analysis.service.database import DatabaseConnection
+from lsst.rubintv.analysis.service.data import DataCenter
 
 # Convert visit DB datatypes to sqlite3 datatypes
 datatype_transform = {
@@ -56,8 +63,42 @@ def create_table(cursor: sqlite3.Cursor, tbl_name: str, schema: dict):
     cursor.execute(command)
 
 
-def get_test_data_dict() -> dict:
-    """Get a dictionary containing the test data"""
+def get_visit_data_dict() -> dict:
+    """Get a dictionary containing the visit test data"""
+
+    return {
+        "seq_num": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+        "day_obs": [
+            "2023-05-19",
+            "2023-05-19",
+            "2023-05-19",
+            "2023-05-19",
+            "2023-05-19",
+            "2023-02-14",
+            "2023-02-14",
+            "2023-02-14",
+            "2023-02-14",
+            "2023-02-14",
+        ],
+        "instrument": [
+            "LSST",
+            "LSST",
+            "LSST",
+            "LSST",
+            "LSST",
+            "DECam",
+            "DECam",
+            "DECam",
+            "DECam",
+            "DECam",
+        ],
+        "ra": [10, 20, None, 40, 50, 60, 70, None, 90, 100],
+        "dec": [-40, -30, None, -10, 0, 10, None, 30, 40, 50],
+    }
+
+
+def get_exposure_data_dict() -> dict:
+    """Get a dictionary containing the exposure test data"""
     obs_start = [
         "2023-05-19 20:20:20",
         "2023-05-19 21:21:21",
@@ -74,10 +115,32 @@ def get_test_data_dict() -> dict:
     obs_start_mjd = [Time(time).mjd for time in obs_start]
 
     return {
-        "exposure_id": [0, 2, 4, 6, 8, 10, 12, 14, 16, 18],
         "seq_num": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
-        "ra": [10, 20, None, 40, 50, 60, 70, None, 90, 100],
-        "dec": [-40, -30, None, -10, 0, 10, None, 30, 40, 50],
+        "day_obs": [
+            "2023-05-19",
+            "2023-05-19",
+            "2023-05-19",
+            "2023-05-19",
+            "2023-05-19",
+            "2023-02-14",
+            "2023-02-14",
+            "2023-02-14",
+            "2023-02-14",
+            "2023-02-14",
+        ],
+        "instrument": [
+            "LSST",
+            "LSST",
+            "LSST",
+            "LSST",
+            "LSST",
+            "DECam",
+            "DECam",
+            "DECam",
+            "DECam",
+            "DECam",
+        ],
+        "exposure_id": [0, 2, 4, 6, 8, 10, 12, 14, 16, 18],
         "expTime": [30, 30, 10, 15, 15, 30, 30, 30, 15, 20],
         "physical_filter": [
             "LSST g-band",
@@ -91,56 +154,52 @@ def get_test_data_dict() -> dict:
             "DECam z-band",
             "DECam y-band",
         ],
-        "obsNight": [
-            "2023-05-19",
-            "2023-05-19",
-            "2023-05-19",
-            "2023-05-19",
-            "2023-05-19",
-            "2023-02-14",
-            "2023-02-14",
-            "2023-02-14",
-            "2023-02-14",
-            "2023-02-14",
-        ],
         "obsStart": obs_start,
         "obsStartMJD": obs_start_mjd,
     }
 
 
-def get_test_data() -> ApTable:
+def get_test_data(table: str) -> ApTable:
     """Generate data for the test database"""
-    data_dict = get_test_data_dict()
+    if table == "Visit":
+        data_dict = get_visit_data_dict()
+    else:
+        data_dict = get_exposure_data_dict()
 
-    table = ApTable(list(data_dict.values()), names=list(data_dict.keys()))
-    return table
+    return ApTable(list(data_dict.values()), names=list(data_dict.keys()))
 
 
 def ap_table_to_list(data: ApTable) -> list:
     """Convert an astropy Table into a list of tuples."""
     rows = []
     for row in data:
-        rows.append(tuple(row))
+        rows.append(tuple(row))  # type: ignore
     return rows
 
 
 def create_database(schema: dict, db_filename: str):
     """Create the test database"""
-    tbl_name = "ExposureInfo"
-    connection = sqlite3.connect(db_filename)
-    cursor = connection.cursor()
 
-    create_table(cursor, tbl_name, schema["tables"][0]["columns"])
+    for table in schema["tables"]:
+        connection = sqlite3.connect(db_filename)
+        cursor = connection.cursor()
 
-    data = get_test_data_dict()
+        create_table(cursor, table["name"], table["columns"])
 
-    for n in range(len(data["exposure_id"])):
-        row = tuple(data[key][n] for key in data.keys())
-        value_str = "?, " * (len(row) - 1) + "?"
-        command = f"INSERT INTO {tbl_name} VALUES({value_str});"
-        cursor.execute(command, row)
-    connection.commit()
-    cursor.close()
+        if table["name"] == "Visit":
+            data = get_visit_data_dict()
+        elif table["name"] == "ExposureInfo":
+            data = get_exposure_data_dict()
+        else:
+            raise ValueError(f"Unknown table name: {table['name']}")
+
+        for n in range(len(data["seq_num"])):
+            row = tuple(data[key][n] for key in data.keys())
+            value_str = "?, " * (len(row) - 1) + "?"
+            command = f"INSERT INTO {table['name']} VALUES({value_str});"
+            cursor.execute(command, row)
+        connection.commit()
+        cursor.close()
 
 
 class TableMismatchError(AssertionError):
@@ -154,6 +213,30 @@ class RasTestCase(TestCase):
     database results, but in the future other checks
     might be put in place.
     """
+
+    def setUp(self):
+        # Load the testdb schema
+        path = os.path.dirname(__file__)
+        yaml_filename = os.path.join(path, "schema.yaml")
+
+        with open(yaml_filename) as file:
+            schema = yaml.safe_load(file)
+
+        # Create the sqlite test database
+        db_file = tempfile.NamedTemporaryFile(delete=False)
+        create_database(schema, db_file.name)
+        self.db_file = db_file
+
+        # Set up the sqlalchemy connection
+        engine = sqlalchemy.create_engine("sqlite:///" + db_file.name)
+
+        # Create the datacenter
+        self.database = DatabaseConnection(schema=schema, engine=engine)
+        self.dataCenter = DataCenter(databases={"testdb": self.database})
+
+    def tearDown(self) -> None:
+        self.db_file.close()
+        os.remove(self.db_file.name)
 
     @staticmethod
     def get_data_table_indices(table: list[tuple]) -> list[int]:

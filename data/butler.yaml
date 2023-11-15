@@ -1,0 +1,12 @@
+---
+name: butlerIds
+description: Data IDs for data products that can be fetched using the Butler
+categories:
+  catalogs:
+    dummy: placeholder for catalogs
+  images:
+    exposure:
+      dataId:
+        - day_obs
+        - seq_num
+        - instrument

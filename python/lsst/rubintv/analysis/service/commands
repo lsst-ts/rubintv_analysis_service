@@ -1,0 +1,104 @@
+from dataclasses import dataclass
+
+from .command import BaseCommand
+from .data import DataCenter
+from .database import DatabaseConnection
+
+@dataclass(kw_only=True)
+class LoadColumnsCommand(BaseCommand):
+    """Load columns from a database table with an optional query.
+
+    Attributes
+    ----------
+    database :
+        The name of the database that the table is in.
+    columns :
+        Columns that are to be loaded.
+        This should be a string with the format `table.columnName`.
+        If there is only a single entry and it does not contain a `.`,
+        then the table name is used and all of the columns matching the
+        `query` are loaded.
+    query :
+        Query used to select rows in the table.
+        If `query` is ``None`` then all the rows are loaded.
+    """
+
+    database: str
+    columns: list[str]
+    query: dict | None = None
+    response_type: str = "table columns"
+
+    def build_contents(self, dataCenter: DataCenter) -> dict:
+        # Query the database to return the requested columns
+        database = dataCenter.databases[self.database]
+        data = database.query(self.columns, self.query)
+
+        if not data:
+            # There is no column data to return
+            content: dict = {
+                "columns": self.columns,
+                "data": [],
+            }
+        else:
+            content = {
+                "columns": [column for column in data[0]._fields],
+                "data": [list(row) for row in data],
+            }
+
+        return content
+
+
+@dataclass(kw_only=True)
+class CalculateBoundsCommand(BaseCommand):
+    """Calculate the bounds of a table column.
+
+    Attributes
+    ----------
+    database :
+        The name of the database that the table is in.
+    table :
+        The table that the columns are loaded from.
+    column :
+        The column to calculate the bounds of.
+    """
+
+    database: str
+    table: str
+    column: str
+    response_type: str = "column bounds"
+
+    def build_contents(self, dataCenter: DataCenter) -> dict:
+        # Query the database to return the requested columns
+        database = dataCenter.databases[self.database]
+        data = database.calculate_bounds(
+            table=self.table,
+            column=self.column,
+        )
+        return {
+            "column": self.column,
+            "bounds": data,
+        }
+
+
+@dataclass(kw_only=True)
+class LoadSchemaCommand(BaseCommand):
+    """Load the schema for a database.
+
+    Attributes
+    ----------
+    database :
+        The name of the database that the table is in.
+    """
+
+    database: str
+    response_type: str = "database schema"
+
+    def build_contents(self, dataCenter: DataCenter) -> dict:
+        database = dataCenter.databases[self.database]
+        return database.schema
+
+
+# Register the commands
+LoadColumnsCommand.register("load columns")
+CalculateBoundsCommand.register("get bounds")
+LoadSchemaCommand.register("load schema")

@@ -22,11 +22,23 @@
 import argparse
 import os
 import pathlib
-
+from lsst.rubintv.analysis.service.command import DataCenter
+from lsst.rubintv.analysis.service.database import DatabaseConnection
 import yaml
-from lsst.rubintv.analysis.service.client import Worker
+
+import sqlalchemy
+
+from lsst.daf.butler import Butler
+from lsst.rubintv.analysis.service.data import DataMatch
+from lsst.rubintv.analysis.service.efd import EfdClient
+from lsst.rubintv.analysis.service.worker import Worker
 
 default_config = os.path.join(pathlib.Path(__file__).parent.absolute(), "config.yaml")
+
+
+class UniversalToVisit(DataMatch):
+    def get_join(self):
+        return
 
 
 def main():
@@ -46,8 +58,33 @@ def main():
     with open(args.config, "r") as file:
         config = yaml.safe_load(file)
 
+    # Initialize the data center that provides access to various data sources
+    databases: dict[str, DatabaseConnection] = {}
+
+    for name, info in config["databases"].items():
+        with open(info["schema"], "r") as file:
+            engine = sqlalchemy.create_engine(info["url"])
+            schema = yaml.safe_load(file)
+            databases[name] = DatabaseConnection(schema=schema, engine=engine)
+
+    # Load the Butler (if one is available)
+    butler: Butler | None = None
+    if "butler" in config:
+        repo = config["butler"].pop("repo")
+        butler = Butler(repo, **config["butler"])
+
+    # Load the EFD client (if one is available)
+    efd_client: EfdClient | None = None
+    if "efd" in config:
+        raise NotImplementedError("EFD client not yet implemented")
+
+    # Create the DataCenter that keeps track of all data sources.
+    # This will have to be updated every time we want to
+    # change/add a new data source.
+    dataCenter = DataCenter(databases=databases, butler=butler, efd_client=efd_client)
+
     # Run the client and connect to rubinTV via websockets
-    worker = Worker(args.address, args.port, config)
+    worker = Worker(args.address, args.port, dataCenter)
     worker.run()
 
 

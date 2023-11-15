@@ -1,8 +1,9 @@
 ---
 databases:
   summitcdb:
-    schema: "/Users/fred3m/temp/visitDb/summit.yaml"
+    schema: "/Users/fred3m/code/lsst/rubintv_analysis_service/data/summit.yaml"
     url: "sqlite:////Users/fred3m/temp/visitDb/summit.db"
 #butler:
 #  repo: /repos/main
-#  skymap: hsc_rings_v1
+#efd:
+# url: connection info here
