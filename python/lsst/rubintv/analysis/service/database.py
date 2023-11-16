@@ -99,7 +99,6 @@ class InnerJoin(Join):
                 table_model1.columns[self.matches[table1][index]]
                 == table_model2.columns[self.matches[table2][index]]
             )
-        print("joins:", joins)
         return sqlalchemy.and_(*joins)
 
 
@@ -310,9 +309,8 @@ class DatabaseConnection:
                 table_columns[table] = []
             table_columns[table].append(column)
 
-        # Add the index columns for each table if they aren't in the
-        # list of columns to select.
-        select_columns = []
+        # Query each table individually.
+        queries = {}
         for table, columns in table_columns.items():
             # Add the index columns to the result, since the front end
             # will need the unique identifier for each row.
@@ -321,16 +319,27 @@ class DatabaseConnection:
             for index in table_schema["index_columns"]:
                 if index not in table_columns:
                     table_columns[table].append(index)
-            select_columns += [self.get_column(f"{table}.{column}") for column in columns]
+            select_columns = [self.get_column(f"{table}.{column}") for column in columns]
 
-        # Select columns to query.
-        non_null_conditions = sqlalchemy.and_(*[col.isnot(None) for col in select_columns])
-        query_model = sqlalchemy.select(*select_columns).where(non_null_conditions)
+            # Select columns to query.
+            non_null_conditions = sqlalchemy.and_(*[col.isnot(None) for col in select_columns])
+            query_model = sqlalchemy.select(*select_columns).where(non_null_conditions)
 
-        # Apply the query (if there is one).
-        if query is not None:
-            _query = Query.from_dict(query)(self)
-            query_model = query_model.where(_query.result)
+            # Apply the query (if there is one).
+            if query is not None:
+                _query = Query.from_dict(query)(self)
+                query_model = query_model.where(_query.result)
+
+            queries[table] = query_model
+
+        # Include a join if there is more than one table in the selection
+        query_model = queries[0]
+        last_table = list(queries.keys())[0]
+        if len(queries) > 1:
+            for table in queries[1:]:
+                query = queries[table]
+                join = self.get_join(last_table, table, "inner")
+
 
         # Include a join if there is more than one table in the selection
         join_conditions = []
