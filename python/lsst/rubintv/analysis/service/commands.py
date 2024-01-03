@@ -1,8 +1,13 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from .command import BaseCommand
-from .data import DataCenter
-from .database import DatabaseConnection
+
+
+if TYPE_CHECKING:
+    from .data import DataCenter
 
 @dataclass(kw_only=True)
 class LoadColumnsCommand(BaseCommand):
@@ -56,14 +61,11 @@ class CalculateBoundsCommand(BaseCommand):
     ----------
     database :
         The name of the database that the table is in.
-    table :
-        The table that the columns are loaded from.
     column :
-        The column to calculate the bounds of.
+        The column to calculate the bounds of in the format "table.column".
     """
 
     database: str
-    table: str
     column: str
     response_type: str = "column bounds"
 
@@ -71,7 +73,6 @@ class CalculateBoundsCommand(BaseCommand):
         # Query the database to return the requested columns
         database = dataCenter.databases[self.database]
         data = database.calculate_bounds(
-            table=self.table,
             column=self.column,
         )
         return {

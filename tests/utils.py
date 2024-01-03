@@ -240,7 +240,7 @@ class RasTestCase(TestCase):
 
     @staticmethod
     def get_data_table_indices(table: list[tuple]) -> list[int]:
-        """Get the index for each rom in the data table.
+        """Get the index for each row in the data table.
 
         Parameters
         ----------

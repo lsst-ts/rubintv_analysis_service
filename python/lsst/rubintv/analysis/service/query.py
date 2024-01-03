@@ -105,15 +105,18 @@ class EqualityQuery(Query):
         self.value = value
 
     def __call__(self, database: DatabaseConnection) -> QueryResult:
-        table, column = self.column.split(".")
+        table_name, _ = self.column.split(".")
+        column = database.get_column(self.column)
+        result = None
         if self.operator in ("eq", "ne", "lt", "le", "gt", "ge"):
             operator = getattr(op, self.operator)
-            return operator(column, self.value)
-
-        if self.operator not in ("startswith", "endswith", "contains"):
+            result = operator(column, self.value)
+        elif self.operator in ("startswith", "endswith", "contains"):
+            result = getattr(column, self.operator)(self.value)
+        else :
             raise QueryError(f"Unrecognized Equality operator {self.operator}")
 
-        return QueryResult(getattr(column, self.operator)(self.value), set(table))
+        return QueryResult(result, set((table_name,)))
 
     @staticmethod
     def from_dict(query_dict: dict[str, Any]) -> EqualityQuery:
@@ -135,7 +138,7 @@ class ParentQuery(Query):
         self._children = children
         self._operator = operator
 
-    def __call__(self, database: DatabaseConnection) -> QueryResult | None:
+    def __call__(self, database: DatabaseConnection) -> QueryResult:
         child_results = []
         tables = set()
         for child in self._children:
@@ -146,21 +149,20 @@ class ParentQuery(Query):
         try:
             match self._operator:
                 case "AND":
-                    return QueryResult(sqlalchemy.and_(*child_results), tables)
+                    result = sqlalchemy.and_(*child_results)
                 case "OR":
-                    return QueryResult(sqlalchemy.or_(*child_results), tables)
+                    result = sqlalchemy.or_(*child_results)
                 case "NOT":
-                    return QueryResult(sqlalchemy.not_(*child_results), tables)
+                    result = sqlalchemy.not_(*child_results)
                 case "XOR":
-                    return QueryResult(
-                        sqlalchemy.and_(
-                            sqlalchemy.or_(*child_results),
-                            sqlalchemy.not_(sqlalchemy.and_(*child_results)),
-                        ),
-                        tables,
+                    result = sqlalchemy.and_(
+                        sqlalchemy.or_(*child_results),
+                        sqlalchemy.not_(sqlalchemy.and_(*child_results)),
                     )
         except Exception:
             raise QueryError("Error applying a boolean query statement.")
+
+        return QueryResult(result, tables)  # type: ignore
 
     @staticmethod
     def from_dict(query_dict: dict[str, Any]) -> ParentQuery:

@@ -23,10 +23,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from typing import cast, Sequence
-from lsst.rubintv.analysis.service.data import DataId, DatabaseSelectionId
 
 import sqlalchemy
 from .query import Query
+from .data import DataId, DatabaseSelectionId
 
 
 class UnrecognizedTableError(Exception):
@@ -91,8 +91,8 @@ class InnerJoin(Join):
         tables = tuple(self.matches.keys())
         table1 = tables[0]
         table2 = tables[1]
-        table_model1 = sqlalchemy.Table(table1, database.metadata, autoload_with=database.engine)
-        table_model2 = sqlalchemy.Table(table2, database.metadata, autoload_with=database.engine)
+        table_model1 = database.tables[table1]
+        table_model2 = database.tables[table2]
         joins = []
         for index in range(self.n_columns):
             joins.append(
@@ -300,75 +300,55 @@ class DatabaseConnection:
         result :
             A list of the rows that were returned by the query.
         """
-        # Map each table to all of the columns that are being selected
-        # from that table.
-        table_columns = {}
-        for full_column in columns:
-            table, column = full_column.split(".")
-            if table not in table_columns:
-                table_columns[table] = []
-            table_columns[table].append(column)
+        table_columns = []
+        table_names = set()
+        column_names = set()
+        # get the sql alchemy model for each column
+        for column in columns:
+            table_columns.append(self.get_column(column))
+            table_name, column_name = column.split(".")
+            table_names.add(table_name)
+            column_names.add(column_name)
 
-        # Query each table individually.
-        queries = {}
-        for table, columns in table_columns.items():
-            # Add the index columns to the result, since the front end
-            # will need the unique identifier for each row.
-            table_schema = get_table_schema(self.schema, table)
+        # Add the index for all of the tables that are being selected on
+        for table_name in table_names:
+            _table = get_table_schema(self.schema, table_name)
+            for column in _table["index_columns"]:
+                if column not in column_names:
+                    table_columns.append(self.get_column(f"{table_name}.{column}"))
+                    column_names.add(column)
 
-            for index in table_schema["index_columns"]:
-                if index not in table_columns:
-                    table_columns[table].append(index)
-            select_columns = [self.get_column(f"{table}.{column}") for column in columns]
+        # generate the query
+        query_model = sqlalchemy.and_(*[col.isnot(None) for col in table_columns])
+        if query is not None:
+            query_result = Query.from_dict(query)(self)
+            query_model = sqlalchemy.and_(query_model, query_result.result)
+            table_names.union(query_result.tables)
 
-            # Select columns to query.
-            non_null_conditions = sqlalchemy.and_(*[col.isnot(None) for col in select_columns])
-            query_model = sqlalchemy.select(*select_columns).where(non_null_conditions)
+        # Build the join
+        tables = list(table_names)
+        last_table = tables[0]
+        select_from = self.tables[last_table]
+        if len(table_names) > 1:
+            for table_name in tables[1:]:
+                join = self.get_join(last_table, table_name, "inner")
+                select_from = sqlalchemy.join(select_from, self.tables[table_name], join)
 
-            # Apply the query (if there is one).
-            if query is not None:
-                _query = Query.from_dict(query)(self)
-                query_model = query_model.where(_query.result)
+        # Build the query
+        query_model = sqlalchemy.select(*table_columns).select_from(select_from).where(query_model)
 
-            queries[table] = query_model
-
-        # Include a join if there is more than one table in the selection
-        query_model = queries[0]
-        last_table = list(queries.keys())[0]
-        if len(queries) > 1:
-            for table in queries[1:]:
-                query = queries[table]
-                join = self.get_join(last_table, table, "inner")
-
-
-        # Include a join if there is more than one table in the selection
-        join_conditions = []
-        join_table = None
-        tables = set(table_columns.keys())
-        for table in tables:
-            if join_table is None:
-                # This is the first table.
-                join_table = table
-            else:
-                join_conditions.append((table, self.get_join(join_table, table, "inner")))
-                join_table = table
-        for join in join_conditions:
-            print(type(query_model))
-            query_model = query_model.join(join)
 
         connection = self.engine.connect()
         result = connection.execute(query_model)
         return result.fetchall()
 
-    def calculate_bounds(self, table: str, column: str) -> tuple[float, float]:
+    def calculate_bounds(self, column: str) -> tuple[float, float]:
         """Calculate the min, max for a column
 
         Parameters
         ----------
-        table :
-            The table that is being queried.
         column :
-            The column to calculate the bounds of.
+            The column to calculate the bounds of in the format "table.column".
         engine :
             The engine used to connect to the database.
 
@@ -377,6 +357,7 @@ class DatabaseConnection:
         result :
             The ``(min, max)`` of the chosen column.
         """
+        table, column = column.split(".")
         _table = sqlalchemy.Table(table, self.metadata, autoload_with=self.engine)
         _column = _table.columns[column]
 

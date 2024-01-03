@@ -22,7 +22,9 @@
 import json
 import os
 import tempfile
+from typing import cast
 
+import astropy.table
 import lsst.rubintv.analysis.service as lras
 import lsst.rubintv.analysis.service.database
 import sqlalchemy
@@ -41,17 +43,15 @@ class TestCommand(utils.RasTestCase):
         utils.create_database(schema, db_file.name)
         self.db_file = db_file
         self.db_filename = db_file.name
-        self.schema = schema
 
         # Load the database connection information
-        self.databases = {
+        databases = {
             "testdb": lsst.rubintv.analysis.service.database.DatabaseConnection(
                 schema=schema, engine=sqlalchemy.create_engine("sqlite:///" + db_file.name)
             )
         }
 
-        # Set up the sqlalchemy connection
-        self.engine = sqlalchemy.create_engine("sqlite:///" + db_file.name)
+        self.data_center = lras.data.DataCenter(databases=databases)
 
     def tearDown(self) -> None:
         self.db_file.close()
@@ -59,7 +59,7 @@ class TestCommand(utils.RasTestCase):
 
     def execute_command(self, command: dict, response_type: str) -> dict:
         command_json = json.dumps(command)
-        response = lras.command.execute_command(command_json, self.databases, None)
+        response = lras.command.execute_command(command_json, self.data_center)
         result = json.loads(response)
         self.assertEqual(result["type"], response_type)
         return result["content"]
@@ -71,35 +71,24 @@ class TestCalculateBoundsCommand(TestCommand):
             "name": "get bounds",
             "parameters": {
                 "database": "testdb",
-                "table": "ExposureInfo",
-                "column": "dec",
+                "column": "Visit.dec",
             },
         }
+        print(lras.command.BaseCommand.command_registry)
         content = self.execute_command(command, "column bounds")
-        self.assertEqual(content["column"], "dec")
+        self.assertEqual(content["column"], "Visit.dec")
         self.assertListEqual(content["bounds"], [-40, 50])
 
 
 class TestLoadColumnsCommand(TestCommand):
-    def test_load_full_dataset(self):
-        command = {"name": "load columns", "parameters": {"database": "testdb", "table": "ExposureInfo"}}
-
-        content = self.execute_command(command, "table columns")
-        data = content["data"]
-
-        truth = utils.ap_table_to_list(utils.get_test_data())
-
-        self.assertDataTableEqual(data, truth)
-
     def test_load_full_columns(self):
         command = {
             "name": "load columns",
             "parameters": {
                 "database": "testdb",
-                "table": "ExposureInfo",
                 "columns": [
-                    "ra",
-                    "dec",
+                    "Visit.ra",
+                    "Visit.dec",
                 ],
             },
         }
@@ -108,9 +97,9 @@ class TestLoadColumnsCommand(TestCommand):
         columns = content["columns"]
         data = content["data"]
 
-        truth = utils.get_test_data()["exposure_id", "ra", "dec"]
-        valid = (truth["ra"] != None) & (truth["dec"] != None)  # noqa: E711
-        truth = truth[valid]
+        truth = cast(astropy.table.Table, utils.get_test_data("Visit")["ra", "dec", "day_obs", "seq_num", "instrument"])
+        valid = (truth["ra"] != None) & (truth["dec"] != None)
+        truth = cast(astropy.table.Table, truth[valid])
         truth_data = utils.ap_table_to_list(truth)
         truth_data = truth_data
 
@@ -122,16 +111,15 @@ class TestLoadColumnsCommand(TestCommand):
             "name": "load columns",
             "parameters": {
                 "database": "testdb",
-                "table": "ExposureInfo",
                 "columns": [
-                    "exposure_id",
-                    "ra",
-                    "dec",
+                    "ExposureInfo.exposure_id",
+                    "Visit.ra",
+                    "Visit.dec",
                 ],
                 "query": {
                     "name": "EqualityQuery",
                     "content": {
-                        "column": "expTime",
+                        "column": "ExposureInfo.expTime",
                         "operator": "eq",
                         "value": 30,
                     },
@@ -143,7 +131,11 @@ class TestLoadColumnsCommand(TestCommand):
         columns = content["columns"]
         data = content["data"]
 
-        truth = utils.get_test_data()["exposure_id", "ra", "dec"]
+        visit_truth = utils.get_test_data("Visit")
+        exp_truth = utils.get_test_data("ExposureInfo")
+        truth = astropy.table.join(visit_truth, exp_truth, keys=("seq_num", "day_obs", "instrument"))
+        truth = truth["exposure_id", "ra", "dec", "day_obs", "seq_num", "instrument"]
+
         # Select rows with expTime = 30
         truth = truth[[True, True, False, False, False, True, False, False, False, False]]
         truth_data = utils.ap_table_to_list(truth)
@@ -160,7 +152,7 @@ class TestCommandErrors(TestCommand):
 
     def test_errors(self):
         # Command cannot be decoded as JSON dict
-        content = self.execute_command("{'test': [1,2,3,0004,}", "error")
+        content = self.execute_command("{'test': [1,2,3,0004,}", "error")  # type: ignore
         self.check_error_response(content, "parsing error")
 
         # Command does not contain a "name"
@@ -205,7 +197,7 @@ class TestCommandErrors(TestCommand):
         # Command execution failed (table name does not exist)
         command = {
             "name": "get bounds",
-            "parameters": {"database": "testdb", "table": "InvalidTable", "column": "invalid_column"},
+            "parameters": {"database": "testdb", "column": "InvalidTable.invalid_column"},
         }
         content = self.execute_command(command, "error")
         self.check_error_response(

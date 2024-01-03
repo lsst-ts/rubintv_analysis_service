@@ -19,12 +19,17 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+from __future__ import annotations
+
 import json
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from .data import DataCenter
+if TYPE_CHECKING:
+    from .data import DataCenter
+
 
 logger = logging.getLogger("lsst.rubintv.analysis.service.command")
 

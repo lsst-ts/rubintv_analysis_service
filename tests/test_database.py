@@ -74,7 +74,7 @@ class TestDatabase(utils.RasTestCase):
         truth = astropy.table.join(visit_truth, exp_truth, keys=("seq_num", "day_obs", "instrument"))
         valid = (truth["ra"] != None) & (truth["dec"] != None)  # noqa: E711
         truth = truth[valid]
-        truth = utils.ap_table_to_list(truth["ra", "dec", "day_obs", "seq_num", "instrument", "exposure_id"])
+        truth = utils.ap_table_to_list(truth["ra", "dec", "exposure_id", "day_obs", "seq_num", "instrument"])
 
         data = self.database.query(columns=["Visit.ra", "Visit.dec", "ExposureInfo.exposure_id"])
 
@@ -88,5 +88,5 @@ class TestDatabase(utils.RasTestCase):
             self.assertTupleEqual(row, true_row)
 
     def test_calculate_bounds(self):
-        result = self.database.calculate_bounds("Visit", "dec")
+        result = self.database.calculate_bounds("Visit.dec")
         self.assertTupleEqual(result, (-40, 50))

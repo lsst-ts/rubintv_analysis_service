@@ -18,13 +18,18 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+from __future__ import annotations
+
 import logging
+from typing import TYPE_CHECKING
 
 from websocket import WebSocketApp
 
 from .command import execute_command
-from .command import DataCenter
 from .utils import Colors, printc
+
+if TYPE_CHECKING:
+    from .command import DataCenter
 
 logger = logging.getLogger("lsst.rubintv.analysis.service.client")
 

@@ -22,6 +22,7 @@
 import os
 import tempfile
 
+import astropy.table
 import lsst.rubintv.analysis.service as lras
 import sqlalchemy
 import utils
@@ -44,68 +45,70 @@ class TestQuery(utils.RasTestCase):
         # Set up the sqlalchemy connection
         self.engine = sqlalchemy.create_engine("sqlite:///" + db_file.name)
         self.metadata = sqlalchemy.MetaData()
-        self.table = sqlalchemy.Table("ExposureInfo", self.metadata, autoload_with=self.engine)
+        self.database = lras.database.DatabaseConnection(schema=schema, engine=self.engine)
 
     def tearDown(self) -> None:
         self.db_file.close()
         os.remove(self.db_file.name)
 
     def test_equality(self):
-        table = self.table
-        column = table.columns.dec
+        query_table = self.database.tables["Visit"]
+        query_column = query_table.columns.dec
 
         value = 0
         truth_dict = {
-            "eq": column == value,
-            "ne": column != value,
-            "lt": column < value,
-            "le": column <= value,
-            "gt": column > value,
-            "ge": column >= value,
+            "eq": query_column == value,
+            "ne": query_column != value,
+            "lt": query_column < value,
+            "le": query_column <= value,
+            "gt": query_column > value,
+            "ge": query_column >= value,
         }
 
         for operator, truth in truth_dict.items():
-            self.assertTrue(lras.query.EqualityQuery("dec", operator, value)(table).compare(truth))
+            result = lras.query.EqualityQuery("Visit.dec", operator, value)(self.database)
+            self.assertTrue(result.result.compare(truth))
+            self.assertSetEqual(result.tables, {"Visit",})
 
     def test_query(self):
-        table = self.table
-
+        dec_column = self.database.tables["Visit"].columns.dec
+        ra_column = self.database.tables["Visit"].columns.ra
         # dec > 0
-        query = lras.query.EqualityQuery("dec", "gt", 0)
-        result = query(table)
-        self.assertTrue(result.compare(table.columns.dec > 0))
+        query = lras.query.EqualityQuery("Visit.dec", "gt", 0)
+        result = query(self.database)
+        self.assertTrue(result.result.compare(dec_column > 0))
 
         # dec < 0 and ra > 60
         query = lras.query.ParentQuery(
             operator="AND",
             children=[
-                lras.query.EqualityQuery("dec", "lt", 0),
-                lras.query.EqualityQuery("ra", "gt", 60),
+                lras.query.EqualityQuery("Visit.dec", "lt", 0),
+                lras.query.EqualityQuery("Visit.ra", "gt", 60),
             ],
         )
-        result = query(table)
+        result = query(self.database)
         truth = sqlalchemy.and_(
-            table.columns.dec < 0,
-            table.columns.ra > 60,
+            dec_column < 0,
+            ra_column > 60,
         )
-        self.assertTrue(result.compare(truth))
+        self.assertTrue(result.result.compare(truth))
 
         # Check queries that are unequal to verify that they don't work
-        result = query(table)
+        result = query(self.database)
         truth = sqlalchemy.and_(
-            table.columns.dec < 0,
-            table.columns.ra > 70,
+            dec_column < 0,
+            ra_column > 70,
         )
-        self.assertFalse(result.compare(truth))
+        self.assertFalse(result.result.compare(truth))
 
     def test_database_query(self):
-        data = utils.get_test_data()
+        data = utils.get_test_data("Visit")
 
         # dec > 0 (and is not None)
         query1 = {
             "name": "EqualityQuery",
             "content": {
-                "column": "dec",
+                "column": "Visit.dec",
                 "operator": "gt",
                 "value": 0,
             },
@@ -114,7 +117,7 @@ class TestQuery(utils.RasTestCase):
         query2 = {
             "name": "EqualityQuery",
             "content": {
-                "column": "ra",
+                "column": "Visit.ra",
                 "operator": "gt",
                 "value": 60,
             },
@@ -122,9 +125,10 @@ class TestQuery(utils.RasTestCase):
 
         # Test 1: dec > 0 (and is not None)
         query = query1
-        result = lras.database.query_table("ExposureInfo", engine=self.engine, query=query)
-        truth = data[[False, False, False, False, False, True, False, True, True, True]]
-        truth = utils.ap_table_to_list(truth)
+        result = self.database.query(["Visit.ra", "Visit.dec"], query=query)
+        truth = data[[False, False, False, False, False, True, False, False, True, True]]
+        truth = truth["ra", "dec", "day_obs", "seq_num", "instrument"]  # type: ignore
+        truth = utils.ap_table_to_list(truth)  # type:ignore
         self.assertDataTableEqual(result, truth)
 
         # Test 2: dec > 0 and ra > 60 (and neither is None)
@@ -135,9 +139,10 @@ class TestQuery(utils.RasTestCase):
                 "children": [query1, query2],
             },
         }
-        result = lras.database.query_table("ExposureInfo", engine=self.engine, query=query)
+        result = self.database.query(["Visit.ra", "Visit.dec"], query=query)
         truth = data[[False, False, False, False, False, False, False, False, True, True]]
-        truth = utils.ap_table_to_list(truth)
+        truth = truth["ra", "dec", "day_obs", "seq_num", "instrument"]  # type: ignore
+        truth = utils.ap_table_to_list(truth)  # type:ignore
         self.assertDataTableEqual(result, truth)
 
         # Test 3: dec <= 0 or ra > 60 (and neither is None)
@@ -158,9 +163,10 @@ class TestQuery(utils.RasTestCase):
             },
         }
 
-        result = lras.database.query_table("ExposureInfo", engine=self.engine, query=query)
-        truth = data[[True, True, False, True, True, False, True, False, True, True]]
-        truth = utils.ap_table_to_list(truth)
+        result = self.database.query(["Visit.ra", "Visit.dec"], query=query)
+        truth = data[[True, True, False, True, True, False, False, False, True, True]]
+        truth = truth["ra", "dec", "day_obs", "seq_num", "instrument"]  # type: ignore
+        truth = utils.ap_table_to_list(truth)  # type:ignore
         self.assertDataTableEqual(result, truth)
 
         # Test 4: dec > 0 XOR ra > 60
@@ -171,99 +177,106 @@ class TestQuery(utils.RasTestCase):
                 "children": [query1, query2],
             },
         }
-        result = lras.database.query_table("ExposureInfo", engine=self.engine, query=query)
+        result = self.database.query(["Visit.ra", "Visit.dec"], query=query)
         truth = data[[False, False, False, False, False, True, False, False, False, False]]
-        truth = utils.ap_table_to_list(truth)
+        truth = truth["ra", "dec", "day_obs", "seq_num", "instrument"]  # type: ignore
+        truth = utils.ap_table_to_list(truth)  # type:ignore
         self.assertDataTableEqual(result, truth)
 
     def test_database_string_query(self):
-        data = utils.get_test_data()
+        data = utils.get_test_data("ExposureInfo")
 
         # Test equality
         query = {
             "name": "EqualityQuery",
             "content": {
-                "column": "physical_filter",
+                "column": "ExposureInfo.physical_filter",
                 "operator": "eq",
                 "value": "DECam r-band",
             },
         }
-        result = lras.database.query_table("ExposureInfo", engine=self.engine, query=query)
+        result = self.database.query(["ExposureInfo.physical_filter"], query=query)
         truth = data[[False, False, False, False, False, False, True, False, False, False]]
-        truth = utils.ap_table_to_list(truth)
+        truth = truth["physical_filter", "day_obs", "seq_num", "instrument"]  # type: ignore
+        truth = utils.ap_table_to_list(truth)  # type:ignore
         self.assertDataTableEqual(result, truth)
 
         # Test "startswith"
         query = {
             "name": "EqualityQuery",
             "content": {
-                "column": "physical_filter",
+                "column": "ExposureInfo.physical_filter",
                 "operator": "startswith",
                 "value": "DECam",
             },
         }
-        result = lras.database.query_table("ExposureInfo", engine=self.engine, query=query)
+        result = self.database.query(["ExposureInfo.physical_filter"], query=query)
         truth = data[[False, False, False, False, False, True, True, True, True, True]]
-        truth = utils.ap_table_to_list(truth)
+        truth = truth["physical_filter", "day_obs", "seq_num", "instrument"]  # type: ignore
+        truth = utils.ap_table_to_list(truth)  # type:ignore
         self.assertDataTableEqual(result, truth)
 
         # Test "endswith"
         query = {
             "name": "EqualityQuery",
             "content": {
-                "column": "physical_filter",
+                "column": "ExposureInfo.physical_filter",
                 "operator": "endswith",
                 "value": "r-band",
             },
         }
-        result = lras.database.query_table("ExposureInfo", engine=self.engine, query=query)
+        result = self.database.query(["ExposureInfo.physical_filter"], query=query)
         truth = data[[False, True, False, False, False, False, True, False, False, False]]
-        truth = utils.ap_table_to_list(truth)
+        truth = truth["physical_filter", "day_obs", "seq_num", "instrument"]  # type: ignore
+        truth = utils.ap_table_to_list(truth)  # type:ignore
         self.assertDataTableEqual(result, truth)
 
         # Test "like"
         query = {
             "name": "EqualityQuery",
             "content": {
-                "column": "physical_filter",
+                "column": "ExposureInfo.physical_filter",
                 "operator": "contains",
                 "value": "T r",
             },
         }
-        result = lras.database.query_table("ExposureInfo", engine=self.engine, query=query)
+        result = self.database.query(["ExposureInfo.physical_filter"], query=query)
         truth = data[[False, True, False, False, False, False, False, False, False, False]]
-        truth = utils.ap_table_to_list(truth)
+        truth = truth["physical_filter", "day_obs", "seq_num", "instrument"]  # type: ignore
+        truth = utils.ap_table_to_list(truth)  # type:ignore
         self.assertDataTableEqual(result, truth)
 
     def test_database_datatime_query(self):
-        data = utils.get_test_data()
+        data = utils.get_test_data("ExposureInfo")
 
         # Test <
         query1 = {
             "name": "EqualityQuery",
             "content": {
-                "column": "obsStart",
+                "column": "ExposureInfo.obsStart",
                 "operator": "lt",
                 "value": "2023-05-19 23:23:23",
             },
         }
-        result = lras.database.query_table("ExposureInfo", engine=self.engine, query=query1)
+        result = self.database.query(["ExposureInfo.obsStart"], query=query1)
         truth = data[[True, True, True, False, False, True, True, True, True, True]]
-        truth = utils.ap_table_to_list(truth)
+        truth = truth["obsStart", "day_obs", "seq_num", "instrument"]  # type: ignore
+        truth = utils.ap_table_to_list(truth)  # type:ignore
         self.assertDataTableEqual(result, truth)
 
         # Test >
         query2 = {
             "name": "EqualityQuery",
             "content": {
-                "column": "obsStart",
+                "column": "ExposureInfo.obsStart",
                 "operator": "gt",
                 "value": "2023-05-01 23:23:23",
             },
         }
-        result = lras.database.query_table("ExposureInfo", engine=self.engine, query=query2)
+        result = self.database.query(["ExposureInfo.obsStart"], query=query2)
         truth = data[[True, True, True, True, True, False, False, False, False, False]]
-        truth = utils.ap_table_to_list(truth)
+        truth = truth["obsStart", "day_obs", "seq_num", "instrument"]  # type: ignore
+        truth = utils.ap_table_to_list(truth)  # type:ignore
         self.assertDataTableEqual(result, truth)
 
         # Test in range
@@ -274,7 +287,53 @@ class TestQuery(utils.RasTestCase):
                 "children": [query1, query2],
             },
         }
-        result = lras.database.query_table("ExposureInfo", engine=self.engine, query=query3)
+        result = self.database.query(["ExposureInfo.obsStart"], query=query3)
         truth = data[[True, True, True, False, False, False, False, False, False, False]]
-        truth = utils.ap_table_to_list(truth)
+        truth = truth["obsStart", "day_obs", "seq_num", "instrument"]  # type: ignore
+        truth = utils.ap_table_to_list(truth)  # type:ignore
+        self.assertDataTableEqual(result, truth)
+
+    def test_multiple_table_query(self):
+        visit_truth = utils.get_test_data("Visit")
+        exp_truth = utils.get_test_data("ExposureInfo")
+        truth = astropy.table.join(visit_truth, exp_truth, keys=("seq_num", "day_obs", "instrument"))
+
+        # dec > 0 (and is not None)
+        query1 = {
+            "name": "EqualityQuery",
+            "content": {
+                "column": "Visit.dec",
+                "operator": "gt",
+                "value": 0,
+            },
+        }
+        # exposure time == 30 (and is not None)
+        query2 = {
+            "name": "EqualityQuery",
+            "content": {
+                "column": "ExposureInfo.expTime",
+                "operator": "eq",
+                "value": 30,
+            },
+        }
+        # Intersection of the two queries
+        query3 = {
+            "name": "ParentQuery",
+            "content": {
+                "operator": "AND",
+                "children": [query1, query2],
+            },
+        }
+
+        valid = (truth["dec"] != None) & (truth["ra"] != None) & (truth["exposure_id"] != None)
+        truth = truth[valid]
+        valid = (truth["dec"] > 0) & (truth["expTime"] == 30)
+        truth = truth[valid]
+        truth = utils.ap_table_to_list(truth["ra", "dec", "exposure_id", "day_obs", "seq_num", "instrument"])
+
+        result = self.database.query(
+            columns=["Visit.ra", "Visit.dec", "ExposureInfo.exposure_id"],
+            query=query3
+        )
+
         self.assertDataTableEqual(result, truth)
