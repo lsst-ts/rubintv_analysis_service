@@ -22,7 +22,7 @@
 import argparse
 import os
 import pathlib
-from lsst.rubintv.analysis.service.command import DataCenter
+from lsst.rubintv.analysis.service.data import DataCenter
 from lsst.rubintv.analysis.service.database import DatabaseConnection
 import yaml
 

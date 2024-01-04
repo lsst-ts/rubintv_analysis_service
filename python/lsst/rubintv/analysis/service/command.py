@@ -214,13 +214,13 @@ def execute_command(command_str: str, data_center: DataCenter) -> str:
         command = BaseCommand.command_registry[command_dict["name"]](**parameters)
 
     except Exception as err:
-        logging.exception("Error parsing command.")
+        logging.exception(f"Error parsing command {command_dict}")
         return error_msg(CommandParsingError(f"'{err}' error while parsing command"))
 
     try:
         command.execute(data_center)
     except Exception as err:
-        logging.exception("Error executing command.")
+        logging.exception(f"Error executing command {command_dict}")
         return error_msg(CommandExecutionError(f"{err} error executing command."))
 
     try:
