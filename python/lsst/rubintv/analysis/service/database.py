@@ -58,6 +58,13 @@ def get_table_schema(schema: dict, table: str) -> dict:
 
 
 class Join(ABC):
+    """A join between two tables in a database.
+
+    Attributes
+    ----------
+    join_type :
+        The type of join. For now only "inner" joins are supported.
+    """
     join_type: str
 
     @abstractmethod
@@ -66,6 +73,16 @@ class Join(ABC):
 
 
 class InnerJoin(Join):
+    """An inner join between two tables in a database.
+
+    Attributes
+    ----------
+    n_columns :
+        The number of columns in the join.
+    matches :
+        Dictionary with table names as keys and tuples of column names as
+        values in the order in which they are matched in the join.
+    """
     n_columns: int
     matches: dict[str, tuple[str, ...]]
 
@@ -88,6 +105,13 @@ class InnerJoin(Join):
         self.matches = matches
 
     def __call__(self, database: DatabaseConnection):
+        """Create the sqlalchemy join between the two tables.
+
+        Parameters
+        ----------
+        database :
+            The database connection.
+        """
         tables = tuple(self.matches.keys())
         table1 = tables[0]
         table2 = tables[1]
@@ -349,8 +373,6 @@ class DatabaseConnection:
         ----------
         column :
             The column to calculate the bounds of in the format "table.column".
-        engine :
-            The engine used to connect to the database.
 
         Returns
         -------

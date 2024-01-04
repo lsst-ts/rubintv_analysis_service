@@ -134,14 +134,13 @@ class BaseCommand(ABC):
     response_type: str
 
     @abstractmethod
-    def build_contents(self, dataCenter: DataCenter) -> dict:
+    def build_contents(self, data_center: DataCenter) -> dict:
         """Build the contents of the command.
 
         Parameters
         ----------
-        dataCenter :
-            The `~DataCenter` containing connections to databases, the Butler,
-            and the EfdClient.
+        data_center :
+            Connections to databases, the Butler, and the EFD.
 
         Returns
         -------
@@ -150,7 +149,7 @@ class BaseCommand(ABC):
         """
         pass
 
-    def execute(self, dataCenter: DataCenter):
+    def execute(self, data_center: DataCenter):
         """Execute the command.
 
         This method does not return anything, buts sets the `result`,
@@ -158,13 +157,11 @@ class BaseCommand(ABC):
 
         Parameters
         ----------
-        databases :
-            The database connections.
-        butler :
-            A conencted Butler.
+        data_center :
+            Connections to databases, the Butler, and the EFD.
 
         """
-        self.result = {"type": self.response_type, "content": self.build_contents(dataCenter)}
+        self.result = {"type": self.response_type, "content": self.build_contents(data_center)}
 
     def to_json(self, requestId: str | None = None):
         """Convert the `result` into JSON."""
@@ -180,7 +177,7 @@ class BaseCommand(ABC):
         BaseCommand.command_registry[name] = cls
 
 
-def execute_command(command_str: str, dataCenter: DataCenter) -> str:
+def execute_command(command_str: str, data_center: DataCenter) -> str:
     """Parse a JSON formatted string into a command and execute it.
 
     Command format:
@@ -195,12 +192,9 @@ def execute_command(command_str: str, dataCenter: DataCenter) -> str:
     ----------
     command_str :
         The JSON formatted command received from the user.
-    databases :
-        The database connections.
-    butler :
-        A connected Butler.
+    data_center :
+        Connections to databases, the Butler, and the EFD.
     """
-    print("command string: ", command_str)
     try:
         command_dict = json.loads(command_str)
         if not isinstance(command_dict, dict):
@@ -224,7 +218,7 @@ def execute_command(command_str: str, dataCenter: DataCenter) -> str:
         return error_msg(CommandParsingError(f"'{err}' error while parsing command"))
 
     try:
-        command.execute(dataCenter)
+        command.execute(data_center)
     except Exception as err:
         logging.exception("Error executing command.")
         return error_msg(CommandExecutionError(f"{err} error executing command."))

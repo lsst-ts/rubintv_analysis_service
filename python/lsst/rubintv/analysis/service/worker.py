@@ -35,6 +35,17 @@ logger = logging.getLogger("lsst.rubintv.analysis.service.client")
 
 
 class Worker:
+    """A worker that connects to the rubinTV server and executes commands.
+
+    Attributes
+    ----------
+    _address :
+        Address of the rubinTV web app websockets.
+    _port :
+        Port of the rubinTV web app websockets.
+    _dataCenter :
+        Data center for the worker.
+    """
     _address: str
     _port: int
     _dataCenter: DataCenter

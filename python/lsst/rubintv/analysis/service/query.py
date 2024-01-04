@@ -40,6 +40,15 @@ class QueryError(Exception):
 
 @dataclass
 class QueryResult:
+    """The result of a query.
+
+    Attributes
+    ----------
+    result :
+        The result of the query as an sqlalchemy expression.
+    tables :
+        All of the tables that were used in the query.
+    """
     result: sqlalchemy.ColumnElement
     tables: set[str]
 
@@ -53,8 +62,14 @@ class Query(ABC):
 
         Parameters
         ----------
-        table :
-            The table to run the query on.
+        database :
+            The connection to the database that is being queried.
+
+        Returns
+        -------
+        QueryResult :
+            The result of the query, including the tables that are
+            needed for the query.
         """
         pass
 

@@ -3,16 +3,16 @@ name: summitcdb
 "@id": "#summit_cdb"
 description: Summit Consolidated Database
 joins:
-  - tables:
-      - Visit
-      - UniversalVisit
-    join_fields:
-      - Visit: day_obs
-        UniversalVisit: day_obs
-      - Visit: seq_num
-        UniversalVisit: seq_num
-      - Visit: instrument
-        UniversalVisit: instrument
+  - type: inner
+    matches:
+      Visit:
+        - day_obs
+        - seq_num
+        - instrument
+      UniversalVisit:
+        - day_obs
+        - seq_num
+        - instrument
 tables:
 - name: UniversalVisit
   index_columns:

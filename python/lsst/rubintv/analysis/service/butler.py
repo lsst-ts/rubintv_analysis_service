@@ -26,4 +26,5 @@ from .command import BaseCommand
 
 @dataclass
 class ExampleButlerCommand(BaseCommand):
+    """Placeholder for butler commands"""
     pass

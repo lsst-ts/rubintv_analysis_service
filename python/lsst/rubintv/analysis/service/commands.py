@@ -1,3 +1,24 @@
+# This file is part of lsst_rubintv_analysis_service.
+#
+# Developed for the LSST Data Management System.
+# This product includes software developed by the LSST Project
+# (https://www.lsst.org).
+# See the COPYRIGHT file at the top-level directory of this distribution
+# for details of code ownership.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -33,9 +54,9 @@ class LoadColumnsCommand(BaseCommand):
     query: dict | None = None
     response_type: str = "table columns"
 
-    def build_contents(self, dataCenter: DataCenter) -> dict:
+    def build_contents(self, data_center: DataCenter) -> dict:
         # Query the database to return the requested columns
-        database = dataCenter.databases[self.database]
+        database = data_center.databases[self.database]
         data = database.query(self.columns, self.query)
 
         if not data:
@@ -69,9 +90,9 @@ class CalculateBoundsCommand(BaseCommand):
     column: str
     response_type: str = "column bounds"
 
-    def build_contents(self, dataCenter: DataCenter) -> dict:
+    def build_contents(self, data_center: DataCenter) -> dict:
         # Query the database to return the requested columns
-        database = dataCenter.databases[self.database]
+        database = data_center.databases[self.database]
         data = database.calculate_bounds(
             column=self.column,
         )
@@ -94,8 +115,8 @@ class LoadSchemaCommand(BaseCommand):
     database: str
     response_type: str = "database schema"
 
-    def build_contents(self, dataCenter: DataCenter) -> dict:
-        database = dataCenter.databases[self.database]
+    def build_contents(self, data_center: DataCenter) -> dict:
+        database = data_center.databases[self.database]
         return database.schema
 
 
