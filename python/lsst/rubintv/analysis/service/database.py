@@ -307,7 +307,7 @@ class DatabaseConnection:
         self,
         columns: list[str],
         query: dict | None = None,
-    ) -> Sequence[sqlalchemy.engine.row.Row]:
+    ) -> dict[str, list]:
         """Query a table and return the results
 
         Parameters
@@ -324,22 +324,25 @@ class DatabaseConnection:
         result :
             A list of the rows that were returned by the query.
         """
-        table_columns = []
+        table_columns = set()
         table_names = set()
         column_names = set()
         # get the sql alchemy model for each column
         for column in columns:
-            table_columns.append(self.get_column(column))
             table_name, column_name = column.split(".")
             table_names.add(table_name)
             column_names.add(column_name)
+            column_obj = self.get_column(column)
+            # Label each column as 'table_name.column_name'
+            table_columns.add(column_obj.label(f"{table_name}.{column_name}"))
 
         # Add the index for all of the tables that are being selected on
         for table_name in table_names:
             _table = get_table_schema(self.schema, table_name)
             for column in _table["index_columns"]:
                 if column not in column_names:
-                    table_columns.append(self.get_column(f"{table_name}.{column}"))
+                    column_obj = self.get_column(f"{table_name}.{column}")
+                    table_columns.add(column_obj.label(f"{table_name}.{column}"))
                     column_names.add(column)
 
         # generate the query
@@ -361,10 +364,14 @@ class DatabaseConnection:
         # Build the query
         query_model = sqlalchemy.select(*table_columns).select_from(select_from).where(query_model)
 
-
+        # Fetch the data
         connection = self.engine.connect()
         result = connection.execute(query_model)
-        return result.fetchall()
+        data = result.fetchall()
+
+        # Convert the unnamed row data into columns
+        return {str(col): [row[i] for row in data] for i, col in enumerate(result.keys())}
+
 
     def calculate_bounds(self, column: str) -> tuple[float, float]:
         """Calculate the min, max for a column

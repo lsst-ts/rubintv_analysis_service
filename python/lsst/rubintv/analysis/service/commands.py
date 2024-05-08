@@ -62,13 +62,15 @@ class LoadColumnsCommand(BaseCommand):
         if not data:
             # There is no column data to return
             content: dict = {
+                "schema": self.database,
                 "columns": self.columns,
                 "data": [],
             }
         else:
             content = {
-                "columns": [column for column in data[0]._fields],
-                "data": [list(row) for row in data],
+                "schema": self.database,
+                "columns": self.columns,
+                "data": data,
             }
 
         return content
