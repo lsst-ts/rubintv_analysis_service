@@ -18,32 +18,54 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-import logging
+from __future__ import annotations
 
-import sqlalchemy
-import yaml
-from lsst.daf.butler import Butler
+import logging
+from typing import TYPE_CHECKING
+
 from websocket import WebSocketApp
 
-from .command import DatabaseConnection, execute_command
-from .utils import Colors, printc
+from .command import execute_command
+
+if TYPE_CHECKING:
+    from .command import DataCenter
 
 logger = logging.getLogger("lsst.rubintv.analysis.service.client")
 
 
 class Worker:
-    def __init__(self, address: str, port: int, connection_info: dict[str, dict]):
+    """A worker that connects to the rubinTV server and executes commands.
+
+    Attributes
+    ----------
+    _address :
+        Address of the rubinTV web app websockets.
+    _port :
+        Port of the rubinTV web app websockets.
+    _dataCenter :
+        Data center for the worker.
+    """
+
+    _address: str
+    _port: int
+    _data_center: DataCenter
+
+    def __init__(self, address: str, port: int, data_center: DataCenter):
         self._address = address
         self._port = port
-        self._connection_info = connection_info
+        self._data_center = data_center
+
+    @property
+    def data_center(self) -> DataCenter:
+        return self._data_center
 
     def on_error(self, ws: WebSocketApp, error: str) -> None:
         """Error received from the server."""
-        printc(f"Error: {error}", color=Colors.BRIGHT_RED)
+        logger.error(f"Error: {error}")
 
     def on_close(self, ws: WebSocketApp, close_status_code: str, close_msg: str) -> None:
         """Connection closed by the server."""
-        printc("Connection closed", Colors.BRIGHT_YELLOW)
+        logger.connection("Connection closed")
 
     def run(self) -> None:
         """Run the worker and connect to the rubinTV server.
@@ -57,27 +79,14 @@ class Worker:
         connection_info :
             Connections .
         """
-        # Load the database connection information
-        databases: dict[str, DatabaseConnection] = {}
-
-        for name, info in self._connection_info["databases"].items():
-            with open(info["schema"], "r") as file:
-                engine = sqlalchemy.create_engine(info["url"])
-                schema = yaml.safe_load(file)
-                databases[name] = DatabaseConnection(schema=schema, engine=engine)
-
-        # Load the Butler (if one is available)
-        butler: Butler | None = None
-        if "butler" in self._connection_info:
-            repo = self._connection_info["butler"].pop("repo")
-            butler = Butler(repo, **self._connection_info["butler"])
 
         def on_message(ws: WebSocketApp, message: str) -> None:
             """Message received from the server."""
-            response = execute_command(message, databases, butler)
+            response = execute_command(message, self.data_center)
             ws.send(response)
 
-        printc(f"Connecting to rubinTV at {self._address}:{self._port}", Colors.BRIGHT_GREEN)
+        logger.connection(f"Connecting to rubinTV at {self._address}:{self._port}")
+
         # Connect to the WebSocket server
         ws = WebSocketApp(
             f"ws://{self._address}:{self._port}/ws/worker",

@@ -21,6 +21,8 @@
 
 from __future__ import annotations
 
+import argparse
+import logging
 import uuid
 from dataclasses import dataclass
 from enum import Enum
@@ -29,11 +31,9 @@ import tornado.httpserver
 import tornado.ioloop
 import tornado.web
 import tornado.websocket
-from lsst.rubintv.analysis.service.utils import Colors, printc
+from lsst.rubintv.analysis.service.utils import ServerFormatter
 
-# Default port and address to listen on
-LISTEN_PORT = 2000
-LISTEN_ADDRESS = "localhost"
+logger = logging.getLogger("lsst.rubintv.analysis.service.server")
 
 
 class WorkerPodStatus(Enum):
@@ -75,17 +75,13 @@ class WebSocketHandler(tornado.websocket.WebSocketHandler):
         self.client_id = str(uuid.uuid4())
         if client_type == "worker":
             WebSocketHandler.workers[self.client_id] = WorkerPod(self.client_id, self)
-            printc(
+            logger.worker(
                 f"New worker {self.client_id} connected. Total workers: {len(WebSocketHandler.workers)}",
-                Colors.BLUE,
-                Colors.RED,
             )
         if client_type == "client":
             WebSocketHandler.clients[self.client_id] = self
-            printc(
+            logger.client(
                 f"New client {self.client_id} connected. Total clients: {len(WebSocketHandler.clients)}",
-                Colors.YELLOW,
-                Colors.RED,
             )
 
     def on_message(self, message: str) -> None:
@@ -98,7 +94,7 @@ class WebSocketHandler(tornado.websocket.WebSocketHandler):
             The message received from the client or worker.
         """
         if self.client_id in WebSocketHandler.clients:
-            printc(f"Message received from {self.client_id}", Colors.YELLOW, Colors.RED)
+            logger.client(f"Message received from {self.client_id}")
             client = WebSocketHandler.clients[self.client_id]
 
             # Find an idle worker
@@ -118,11 +114,7 @@ class WebSocketHandler(tornado.websocket.WebSocketHandler):
         if self.client_id in WebSocketHandler.workers:
             worker = WebSocketHandler.workers[self.client_id]
             worker.on_finished(message)
-            printc(
-                f"Message received from worker {self.client_id}. New status {worker.status}",
-                Colors.BLUE,
-                Colors.RED,
-            )
+            logger.worker(f"Message received from worker {self.client_id}. New status {worker.status}")
 
             # Check the queue for any outstanding jobs.
             if len(WebSocketHandler.queue) > 0:
@@ -136,22 +128,14 @@ class WebSocketHandler(tornado.websocket.WebSocketHandler):
         """
         if self.client_id in WebSocketHandler.clients:
             del WebSocketHandler.clients[self.client_id]
-            printc(
-                f"Client disconnected. Active clients: {len(WebSocketHandler.clients)}",
-                Colors.YELLOW,
-                Colors.RED,
-            )
+            logger.client(f"Client disconnected. Active clients: {len(WebSocketHandler.clients)}")
             for worker in WebSocketHandler.workers.values():
                 if worker.connected_client == self:
                     worker.on_finished("Client disconnected")
                     break
         if self.client_id in WebSocketHandler.workers:
             del WebSocketHandler.workers[self.client_id]
-            printc(
-                f"Worker disconnected. Active workers: {len(WebSocketHandler.workers)}",
-                Colors.BLUE,
-                Colors.RED,
-            )
+            logger.worker(f"Worker disconnected. Active workers: {len(WebSocketHandler.workers)}")
 
     def check_origin(self, origin):
         """
@@ -196,11 +180,7 @@ class WorkerPod:
         """
         self.status = WorkerPodStatus.BUSY
         self.connected_client = connected_client
-        printc(
-            f"Worker {self.wid} processing message from client {connected_client.client_id}",
-            Colors.BLUE,
-            Colors.RED,
-        )
+        logger.worker(f"Worker {self.wid} processing message from client {connected_client.client_id}")
         # Send the job to the worker pod
         self.ws.write_message(message)
 
@@ -214,9 +194,7 @@ class WorkerPod:
             # Send the reply to the client that made the request.
             self.connected_client.write_message(message)
         else:
-            printc(
-                f"Worker {self.wid} finished processing, but no client was connected.", Colors.RED, Colors.RED
-            )
+            logger.error(f"Worker {self.wid} finished processing, but no client was connected.")
         self.status = WorkerPodStatus.IDLE
         self.connected_client = None
 
@@ -238,14 +216,45 @@ class QueueItem:
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Initialize a new RubinTV worker.")
+    parser.add_argument(
+        "-a", "--address", default="localhost", type=str, help="Address of the rubinTV web app."
+    )
+    parser.add_argument(
+        "-p", "--port", default=8080, type=int, help="Port of the rubinTV web app websockets."
+    )
+    parser.add_argument(
+        "--log",
+        default="INFO",
+        help="Set the logging level of web app (DEBUG, INFO, WARNING, ERROR, CRITICAL).",
+    )
+    args = parser.parse_args()
+
+    # Configure logging
+    log_level = getattr(logging, args.log.upper(), None)
+    if not isinstance(log_level, int):
+        raise ValueError(f"Invalid log level: {args.log}")
+
+    # Use custom formatting for the server logs
+    handler = logging.StreamHandler()
+    handler.setFormatter(ServerFormatter())
+    for logger_name in [
+        "lsst.rubintv.analysis.service.worker",
+        "lsst.rubintv.analysis.service.client",
+        "lsst.rubintv.analysis.service.server",
+    ]:
+        logger = logging.getLogger(logger_name)
+        logger.setLevel(log_level)
+        logger.addHandler(handler)
+
     # Create tornado application and supply URL routes
     app = tornado.web.Application(WebSocketHandler.urls())  # type: ignore
 
     # Setup HTTP Server
     http_server = tornado.httpserver.HTTPServer(app)
-    http_server.listen(LISTEN_PORT, LISTEN_ADDRESS)
+    http_server.listen(args.port, args.address)
 
-    printc(f"Listening on address: {LISTEN_ADDRESS}, {LISTEN_PORT}", Colors.GREEN, Colors.RED)
+    logger.connection(f"Listening on address: {args.address}, {args.port}")
 
     # Start IO/Event loop
     tornado.ioloop.IOLoop.instance().start()

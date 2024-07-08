@@ -19,36 +19,48 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from dataclasses import dataclass
-from typing import Sequence
+from __future__ import annotations
+
+import logging
 
 import sqlalchemy
-from lsst.daf.butler import Butler
 
-from .command import BaseCommand, DatabaseConnection
+from .data import DatabaseSelectionId, DataId
 from .query import Query
+
+logger = logging.getLogger("lsst.rubintv.analysis.service.database")
+
+
+# Exposure tables currently in the schema
+exposure_tables = [
+    "exposure",
+    "ccdexposure",
+    "ccdexposure_camera",
+]
+
+# Tables in the schema for single visit exposures
+visit1_tables = [
+    "visit1",
+    "visit1_quicklook",
+    "ccdvisit1",
+    "ccdvisit1_quicklook",
+]
+
+# Flex tables in the schema.
+# These are currently not implement and would take some thought implmenting
+# correctly, so we ignore them for now.
+flex_tables = [
+    "exposure_flexdata",
+    "exposure_flexdata_schema",
+    "ccdexposure_flexdata",
+    "ccdexposure_flexdata_schema",
+]
 
 
 class UnrecognizedTableError(Exception):
     """An error that occurs when a table name does not appear in the schema"""
 
     pass
-
-
-def get_table_names(schema: dict) -> tuple[str, ...]:
-    """Given a schema, return a list of dataset names
-
-    Parameters
-    ----------
-    schema :
-        The schema for a database.
-
-    Returns
-    -------
-    result :
-        The names of all the tables in the database.
-    """
-    return tuple(tbl["name"] for tbl in schema["tables"])
 
 
 def get_table_schema(schema: dict, table: str) -> dict:
@@ -73,199 +85,387 @@ def get_table_schema(schema: dict, table: str) -> dict:
     raise UnrecognizedTableError("Could not find the table '{table}' in database")
 
 
-def column_names_to_models(table: sqlalchemy.Table, columns: list[str]) -> list[sqlalchemy.Column]:
-    """Return the sqlalchemy model of a Table column for each column name.
+class JoinError(Exception):
+    """An error that occurs when a join cannot be made between two tables"""
 
-    This method is used to generate a sqlalchemy query based on a `~Query`.
-
-    Parameters
-    ----------
-    table :
-        The name of the table in the database.
-    columns :
-        The names of the columns to generate models for.
-
-    Returns
-    -------
-        A list of sqlalchemy columns.
-    """
-    models = []
-    for column in columns:
-        models.append(getattr(table.columns, column))
-    return models
+    pass
 
 
-def query_table(
-    table: str,
-    engine: sqlalchemy.engine.Engine,
-    columns: list[str] | None = None,
-    query: dict | None = None,
-) -> Sequence[sqlalchemy.engine.row.Row]:
-    """Query a table and return the results
+class JoinBuilder:
+    """Builds joins between tables in sqlalchemy.
 
-    Parameters
-    ----------
-    engine :
-        The engine used to connect to the database.
-    table :
-        The table that is being queried.
-    columns :
-        The columns from the table to return.
-        If `columns` is ``None`` then all the columns
-        in the table are returned.
-    query :
-        A query used on the table.
-        If `query` is ``None`` then all the rows
-        in the query are returned.
-
-    Returns
-    -------
-    result :
-        A list of the rows that were returned by the query.
-    """
-    metadata = sqlalchemy.MetaData()
-    _table = sqlalchemy.Table(table, metadata, autoload_with=engine)
-
-    if columns is None:
-        _query = _table.select()
-    else:
-        _query = sqlalchemy.select(*column_names_to_models(_table, columns))
-
-    if query is not None:
-        _query = _query.where(Query.from_dict(query)(_table))
-
-    connection = engine.connect()
-    result = connection.execute(_query)
-    return result.fetchall()
-
-
-def calculate_bounds(table: str, column: str, engine: sqlalchemy.engine.Engine) -> tuple[float, float]:
-    """Calculate the min, max for a column
-
-    Parameters
-    ----------
-    table :
-        The table that is being queried.
-    column :
-        The column to calculate the bounds of.
-    engine :
-        The engine used to connect to the database.
-
-    Returns
-    -------
-    result :
-        The ``(min, max)`` of the chosen column.
-    """
-    metadata = sqlalchemy.MetaData()
-    _table = sqlalchemy.Table(table, metadata, autoload_with=engine)
-    _column = _table.columns[column]
-
-    query = sqlalchemy.select((sqlalchemy.func.min(_column)))
-    connection = engine.connect()
-    result = connection.execute(query)
-    col_min = result.fetchone()
-    if col_min is not None:
-        col_min = col_min[0]
-    else:
-        raise ValueError(f"Could not calculate the min of column {column}")
-
-    query = sqlalchemy.select((sqlalchemy.func.max(_column)))
-    connection = engine.connect()
-    result = connection.execute(query)
-    col_max = result.fetchone()
-    if col_max is not None:
-        col_max = col_max[0]
-    else:
-        raise ValueError(f"Could not calculate the min of column {column}")
-
-    return col_min, col_max
-
-
-@dataclass(kw_only=True)
-class LoadColumnsCommand(BaseCommand):
-    """Load columns from a database table with an optional query.
+    Using a dictionary of joins, usually from the joins.yaml file,
+    this class builds a graph of joins between tables so that given a
+    list of tables it can create a join that connects all the tables.
 
     Attributes
     ----------
-    database :
-        The name of the database that the table is in.
-    table :
-        The table that the columns are loaded from.
-    columns :
-        Columns that are to be loaded. If `columns` is ``None``
-        then all the columns in the `table` are loaded.
-    query :
-        Query used to select rows in the table.
-        If `query` is ``None`` then all the rows are loaded.
+    tables :
+        A dictionary of tables in the schema.
+    joins :
+        A list of inner joins between tables. Each item in the list should
+        have a ``matches`` key with another dictionary as values.
+        The values will have the names of the tables being joined as keys
+        and a list of columns to join on as values.
     """
 
-    database: str
-    table: str
-    columns: list[str] | None = None
-    query: dict | None = None
-    response_type: str = "table columns"
+    def __init__(self, tables: dict[str, sqlalchemy.Table], joins: list[dict]):
+        self.tables = tables
+        self.joins = joins
+        self.join_graph = self._build_join_graph()
 
-    def build_contents(self, databases: dict[str, DatabaseConnection], butler: Butler | None) -> dict:
-        # Query the database to return the requested columns
-        database = databases[self.database]
-        index_column = get_table_schema(database.schema, self.table)["index_column"]
-        columns = self.columns
-        if columns is not None and index_column not in columns:
-            columns = [index_column] + columns
-        data = query_table(
-            table=self.table,
-            columns=columns,
-            query=self.query,
-            engine=database.engine,
-        )
+    def _build_join_graph(self) -> dict[str, dict[str, list[str]]]:
+        """Create the graph of joins from the list of joins."""
+        graph = {table: {} for table in self.tables}
+        for join in self.joins:
+            tables = list(join["matches"].keys())
+            t1, t2 = tables[0], tables[1]
+            join_columns = list(zip(join["matches"][t1], join["matches"][t2]))
+            graph[t1][t2] = join_columns
+            graph[t2][t1] = [(col2, col1) for col1, col2 in join_columns]
+        return graph
 
-        if not data:
-            # There is no column data to return
-            content: dict = {
-                "columns": columns,
-                "data": [],
-            }
+    def _find_join_path(self, start: str, end: str) -> list[str]:
+        """Find a path between two tables in the join graph.
+
+        In some cases, such as between vist1 and ccdvisit1_quicklook,
+        this might require intermediary joins.
+
+        Parameters
+        ----------
+        start :
+            The name of the table to start the join from.
+        end :
+            The name of the table to join to.
+
+        Returns
+        -------
+        result :
+            A list of tables that can be joined to get from the
+            first table to the last table.
+        """
+        queue = [(start, [start])]
+        visited = set()
+
+        while queue:
+            (node, path) = queue.pop(0)
+            if node not in visited:
+                if node == end:
+                    return path
+                visited.add(node)
+                for neighbor in self.join_graph[node]:
+                    if neighbor not in visited:
+                        queue.append((neighbor, path + [neighbor]))
+        raise JoinError(f"No path found between {start} and {end}")
+
+    def build_join(self, table_names: set[str]) -> sqlalchemy.Table | sqlalchemy.Join:
+        """Build a join between all of the tables in a SQL statement.
+
+        Parameters
+        ----------
+        table_names :
+            A set of table names to join.
+
+        Returns
+        -------
+        result :
+            The join between all of the tables.
+        """
+        tables = list(table_names)
+        select_from = self.tables[tables[0]]
+        # Use the first table as the starting point
+        joined_tables = set([tables[0]])
+        logger.info(f"Starting join with table: {tables[0]}")
+        logger.info(f"all tables: {tables}")
+
+        for i in range(1, len(tables)):
+            # Move to the next table
+            current_table = tables[i]
+            if current_table in joined_tables:
+                logger.info(f"Skipping {current_table} as it's already joined")
+                continue
+
+            # find the join path from the first table to the current table
+            join_path = self._find_join_path(tables[0], current_table)
+            logger.info(f"Join path from {tables[0]} to {current_table}: {join_path}")
+
+            for j in range(1, len(join_path)):
+                # Join all of the tables in the join_path
+                t1, t2 = join_path[j - 1], join_path[j]
+                if t2 in joined_tables:
+                    logger.info(f"Skipping {t2} as it's already joined")
+                    continue
+
+                logger.info(f"Joining {t1} to {t2}")
+                join_conditions = []
+                for col1, col2 in self.join_graph[t1][t2]:
+                    logger.info(f"Attempting to join {t1}.{col1} = {t2}.{col2}")
+                    try:
+                        condition = self.tables[t1].columns[col1] == self.tables[t2].columns[col2]
+                        join_conditions.append(condition)
+                    except KeyError as e:
+                        logger.error(f"Column not found: {e}")
+                        logger.error(f"Available columns in {t1}: {list(self.tables[t1].columns.keys())}")
+                        logger.error(f"Available columns in {t2}: {list(self.tables[t2].columns.keys())}")
+                        raise
+
+                if not join_conditions:
+                    raise ValueError(f"No valid join conditions found between {t1} and {t2}")
+
+                # Implement the join in sqlalchemy
+                select_from = sqlalchemy.join(select_from, self.tables[t2], *join_conditions)
+                joined_tables.add(t2)
+
+        return select_from
+
+
+class ConsDbSchema:
+    """A schema (instrument) in the consolidated database.
+
+    Attributes
+    ----------
+    engine :
+        The engine used to connect to the database.
+    schema :
+        The schema yaml converted into a dict for the instrument.
+    metadata :
+        The metadata for the database.
+    joins :
+        A JoinBuilder object that builds joins between tables.
+    """
+
+    engine: sqlalchemy.engine.Engine
+    schema: dict
+    metadata: sqlalchemy.MetaData
+    tables: dict[str, sqlalchemy.Table]
+    joins: JoinBuilder
+
+    def __init__(self, engine: sqlalchemy.engine.Engine, schema: dict, join_templates: list):
+        self.engine = engine
+        self.schema = schema
+        self.metadata = sqlalchemy.MetaData()
+
+        self.tables = {}
+        for table in schema["tables"]:
+            if (
+                table["name"] not in exposure_tables
+                and table["name"] not in visit1_tables
+                and table["name"] not in flex_tables
+            ):
+                # A new table was added to the schema and cannot be parsed
+                logger.warn(f"Table {table['name']} has not been implemented in the RubinTV analysis service")
+            else:
+                self.tables[table["name"]] = sqlalchemy.Table(
+                    table["name"],
+                    self.metadata,
+                    autoload_with=self.engine,
+                    schema=schema["name"],
+                )
+
+        self.joins = JoinBuilder(self.tables, join_templates)
+
+    def get_table_names(self) -> tuple[str, ...]:
+        """Given a schema, return a list of dataset names
+
+        Returns
+        -------
+        result :
+            The names of all the tables in the database.
+        """
+        return tuple(tbl["name"] for tbl in self.schema["tables"])
+
+    def get_data_id(self, table: str) -> DataId:
+        """Return the data id for a table.
+
+        Parameters
+        ----------
+        table :
+            The name of the table in the database.
+
+        Returns
+        -------
+        result :
+            The data id for the table.
+        """
+        return DataId(database=self.schema["name"], table=table)
+
+    def get_selection_id(self, table: str) -> DatabaseSelectionId:
+        """Return the selection indices for a table.
+
+        Parameters
+        ----------
+        table :
+            The name of the table in the database.
+
+        Returns
+        -------
+        result :
+            The selection indices for the table.
+        """
+        _table = self.schema["tables"][table]
+        index_columns = _table["index_columns"]
+        return DatabaseSelectionId(data_id=self.get_data_id(table), columns=index_columns)
+
+    def get_column(self, column: str) -> sqlalchemy.Column:
+        """Return the column model for a column.
+
+        Parameters
+        ----------
+        column :
+            The name of the column in the database.
+
+        Returns
+        -------
+        result :
+            The column model for the column.
+        """
+        table, column = column.split(".")
+        return self.tables[table].columns[column]
+
+    def fetch_data(self, query_model: sqlalchemy.Select) -> dict[str, list]:
+        """Load data from the database.
+
+        Parameters
+        ----------
+        query_model :
+            The query to run on the database.
+        """
+        logger.info(f"Query: {query_model}")
+        connection = self.engine.connect()
+        result = connection.execute(query_model)
+        data = result.fetchall()
+        connection.close()
+
+        # Convert the unnamed row data into columns
+        return {str(col): [row[i] for row in data] for i, col in enumerate(result.keys())}
+
+    def get_column_models(
+        self, columns: list[str]
+    ) -> tuple[set[sqlalchemy.Column], set[str], list[sqlalchemy.Column]]:
+        """Return the sqlalchemy models for a list of columns.
+
+        Parameters
+        ----------
+        columns :
+            The names of the columns in the database.
+
+        Returns
+        -------
+        result :
+            The column models for the columns.
+        """
+        table_columns = set()
+        table_names: set[str] = set()
+        # get the sql alchemy model for each column
+        for column in columns:
+            table_name, column_name = column.split(".")
+            table_names.add(table_name)
+            column_obj = self.get_column(column)
+            # Label each column as 'table_name.column_name'
+            table_columns.add(column_obj.label(f"{table_name}.{column_name}"))
+
+        # Add the data Ids (seq_num and day_obs) to the query.
+        def add_data_ids(table_name: str) -> list[sqlalchemy.Column]:
+            day_obs_column = self.get_column(f"{table_name}.day_obs")
+            seq_num_column = self.get_column(f"{table_name}.seq_num")
+            # Strip off the table name to make the data IDs uniform
+            table_columns.add(day_obs_column.label("day_obs"))
+            table_columns.add(seq_num_column.label("seq_num"))
+            return [day_obs_column, seq_num_column]
+
+        if list(table_names)[0] in visit1_tables:
+            data_id_columns = add_data_ids("visit1")
+            table_names.add("visit1")
+        elif list(table_names)[0] in exposure_tables:
+            data_id_columns = add_data_ids("exposure")
+            table_names.add("exposure")
         else:
-            content = {
-                "columns": [column for column in data[0]._fields],
-                "data": [list(row) for row in data],
-            }
+            raise ValueError(f"Unsupported table name: {list(table_names)[0]}")
 
-        return content
+        return table_columns, table_names, data_id_columns
 
+    def query(
+        self,
+        columns: list[str],
+        query: Query | None = None,
+        data_ids: list[tuple[int, int]] | None = None,
+    ) -> dict[str, list]:
+        """Query a table and return the results
 
-@dataclass(kw_only=True)
-class CalculateBoundsCommand(BaseCommand):
-    """Calculate the bounds of a table column.
+        Parameters
+        ----------
+        columns :
+            The ``table.column`` names of the columns to load.
+        query :
+            A query used on the table.
+            If `query` is ``None`` then all the rows
+            in the query are returned.
+        data_ids :
+            The data IDs to query, in the format ``(day_obs, seq_num)``.
 
-    Attributes
-    ----------
-    database :
-        The name of the database that the table is in.
-    table :
-        The table that the columns are loaded from.
-    column :
-        The column to calculate the bounds of.
-    """
+        Returns
+        -------
+        result :
+            A dictionary of columns as keys and lists of values as values.
+        """
+        # Get the models for the columns
+        table_columns, table_names, data_id_columns = self.get_column_models(columns)
+        day_obs_column, seq_num_column = data_id_columns
 
-    database: str
-    table: str
-    column: str
-    response_type: str = "column bounds"
+        logger.info(f"table names: {table_names}")
 
-    def build_contents(self, databases: dict[str, DatabaseConnection], butler: Butler | None) -> dict:
-        database = databases[self.database]
-        data = calculate_bounds(
-            table=self.table,
-            column=self.column,
-            engine=database.engine,
-        )
-        return {
-            "column": self.column,
-            "bounds": data,
-        }
+        # generate the query
+        query_model = sqlalchemy.and_(*[col.isnot(None) for col in table_columns])
+        if query is not None:
+            query_result = query(self)
+            query_model = sqlalchemy.and_(query_model, query_result.result)
+            table_names.update(query_result.tables)
+        if data_ids is not None:
+            data_id_select = sqlalchemy.tuple_(day_obs_column, seq_num_column).in_(data_ids)
+            query_model = sqlalchemy.and_(query_model, data_id_select)
 
+        # Build the join
+        select_from = self.joins.build_join(table_names)
 
-# Register the commands
-LoadColumnsCommand.register("load columns")
-CalculateBoundsCommand.register("get bounds")
+        # Build the query
+        query_model = sqlalchemy.select(*table_columns).select_from(select_from).where(query_model)
+
+        # Fetch the data
+        result = self.fetch_data(query_model)
+
+        return result
+
+    def calculate_bounds(self, column: str) -> tuple[float, float]:
+        """Calculate the min, max for a column
+
+        Parameters
+        ----------
+        column :
+            The column to calculate the bounds of in the format "table.column".
+
+        Returns
+        -------
+        result :
+            The ``(min, max)`` of the chosen column.
+        """
+        table, column = column.split(".")
+        _table = sqlalchemy.Table(table, self.metadata, autoload_with=self.engine)
+        _column = _table.columns[column]
+
+        with self.engine.connect() as connection:
+            query = sqlalchemy.select((sqlalchemy.func.min(_column)))
+            result = connection.execute(query)
+            col_min = result.fetchone()
+            if col_min is not None:
+                col_min = col_min[0]
+            else:
+                raise ValueError(f"Could not calculate the min of column {column}")
+
+            query = sqlalchemy.select((sqlalchemy.func.max(_column)))
+            result = connection.execute(query)
+            col_max = result.fetchone()
+            if col_max is not None:
+                col_max = col_max[0]
+            else:
+                raise ValueError(f"Could not calculate the max of column {column}")
+        return col_min, col_max
