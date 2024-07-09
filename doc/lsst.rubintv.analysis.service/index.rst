@@ -6,7 +6,8 @@
 lsst.rubintv.analysis.service
 #############################
 
-.. Paragraph that describes what this Python module does and links to related modules and frameworks.
+This is the backend python service to run the Derived Data Visualization (DDV) tool.
+
 
 .. _lsst.rubintv.analysis.service-using:
 
@@ -17,6 +18,8 @@ toctree linking to topics related to using the module's APIs.
 
 .. toctree::
    :maxdepth: 2
+
+   design
 
 .. _lsst.rubintv.analysis.service-contributing:
 

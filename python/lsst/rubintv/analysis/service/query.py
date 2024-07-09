@@ -23,9 +23,13 @@ from __future__ import annotations
 
 import operator as op
 from abc import ABC, abstractmethod
-from typing import Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 import sqlalchemy
+
+if TYPE_CHECKING:
+    from .database import ConsDbSchema
 
 
 class QueryError(Exception):
@@ -34,17 +38,39 @@ class QueryError(Exception):
     pass
 
 
+@dataclass
+class QueryResult:
+    """The result of a query.
+
+    Attributes
+    ----------
+    result :
+        The result of the query as an sqlalchemy expression.
+    tables :
+        All of the tables that were used in the query.
+    """
+
+    result: sqlalchemy.ColumnElement
+    tables: set[str]
+
+
 class Query(ABC):
     """Base class for constructing queries."""
 
     @abstractmethod
-    def __call__(self, table: sqlalchemy.Table) -> sqlalchemy.sql.elements.BooleanClauseList:
+    def __call__(self, database: ConsDbSchema) -> QueryResult:
         """Run the query on a table.
 
         Parameters
         ----------
-        table :
-            The table to run the query on.
+        database :
+            The connection to the database that is being queried.
+
+        Returns
+        -------
+        QueryResult :
+            The result of the query, including the tables that are
+            needed for the query.
         """
         pass
 
@@ -66,7 +92,7 @@ class Query(ABC):
             elif query_dict["name"] == "ParentQuery":
                 return ParentQuery.from_dict(query_dict["content"])
         except Exception:
-            raise QueryError("Failed to parse query.")
+            raise QueryError(f"Failed to parse query: {query_dict}")
 
         raise QueryError("Unrecognized query type")
 
@@ -94,17 +120,19 @@ class EqualityQuery(Query):
         self.column = column
         self.value = value
 
-    def __call__(self, table: sqlalchemy.Table) -> sqlalchemy.sql.elements.BooleanClauseList:
-        column = table.columns[self.column]
-
+    def __call__(self, database: ConsDbSchema) -> QueryResult:
+        table_name, _ = self.column.split(".")
+        column = database.get_column(self.column)
+        result = None
         if self.operator in ("eq", "ne", "lt", "le", "gt", "ge"):
             operator = getattr(op, self.operator)
-            return operator(column, self.value)
-
-        if self.operator not in ("startswith", "endswith", "contains"):
+            result = operator(column, self.value)
+        elif self.operator in ("startswith", "endswith", "contains"):
+            result = getattr(column, self.operator)(self.value)
+        else:
             raise QueryError(f"Unrecognized Equality operator {self.operator}")
 
-        return getattr(column, self.operator)(self.value)
+        return QueryResult(result, set((table_name,)))
 
     @staticmethod
     def from_dict(query_dict: dict[str, Any]) -> EqualityQuery:
@@ -126,23 +154,31 @@ class ParentQuery(Query):
         self._children = children
         self._operator = operator
 
-    def __call__(self, table: sqlalchemy.Table) -> sqlalchemy.sql.elements.BooleanClauseList:
-        child_results = [child(table) for child in self._children]
+    def __call__(self, database: ConsDbSchema) -> QueryResult:
+        child_results = []
+        tables = set()
+        for child in self._children:
+            result = child(database)
+            child_results.append(result.result)
+            tables.update(result.tables)
+
         try:
             match self._operator:
                 case "AND":
-                    return sqlalchemy.and_(*child_results)
+                    result = sqlalchemy.and_(*child_results)
                 case "OR":
-                    return sqlalchemy.or_(*child_results)
+                    result = sqlalchemy.or_(*child_results)
                 case "NOT":
-                    return sqlalchemy.not_(*child_results)
+                    result = sqlalchemy.not_(*child_results)
                 case "XOR":
-                    return sqlalchemy.and_(
+                    result = sqlalchemy.and_(
                         sqlalchemy.or_(*child_results),
                         sqlalchemy.not_(sqlalchemy.and_(*child_results)),
                     )
         except Exception:
             raise QueryError("Error applying a boolean query statement.")
+
+        return QueryResult(result, tables)  # type: ignore
 
     @staticmethod
     def from_dict(query_dict: dict[str, Any]) -> ParentQuery:

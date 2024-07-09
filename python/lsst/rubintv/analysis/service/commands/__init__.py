@@ -19,13 +19,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from dataclasses import dataclass
-
-from .command import BaseCommand
-
-
-@dataclass
-class ExampleButlerCommand(BaseCommand):
-    """Placeholder for butler commands"""
-
-    pass
+from .butler import *
+from .db import *
+from .image import *

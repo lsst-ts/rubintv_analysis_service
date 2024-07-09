@@ -1,0 +1,21 @@
+---
+joins:
+  # visit1 and visit1_quicklook
+  - type: inner
+    matches:
+      exposure:
+        - exposure_id
+      visit1_quicklook:
+        - visit_id
+  - type: inner
+    matches:
+      exposure:
+        - exposure_id
+      visit1:
+        - visit_id
+  - type: inner
+    matches:
+      visit1:
+        - visit_id
+      visit1_quicklook:
+        - visit_id

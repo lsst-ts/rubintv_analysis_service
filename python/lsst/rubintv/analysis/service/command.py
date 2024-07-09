@@ -19,18 +19,23 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+from __future__ import annotations
+
 import json
 import logging
+import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-import sqlalchemy
-from lsst.daf.butler import Butler
+if TYPE_CHECKING:
+    from .data import DataCenter
+
 
 logger = logging.getLogger("lsst.rubintv.analysis.service.command")
 
 
-def construct_error_message(error_name: str, description: str) -> str:
+def construct_error_message(error_name: str, description: str, traceback: str) -> str:
     """Use a standard format for all error messages.
 
     Parameters
@@ -51,12 +56,13 @@ def construct_error_message(error_name: str, description: str) -> str:
             "content": {
                 "error": error_name,
                 "description": description,
+                "traceback": traceback,
             },
         }
     )
 
 
-def error_msg(error: Exception) -> str:
+def error_msg(error: Exception, traceback: str) -> str:
     """Handle errors received while parsing or executing a command.
 
     Parameters
@@ -72,23 +78,23 @@ def error_msg(error: Exception) -> str:
 
     """
     if isinstance(error, json.decoder.JSONDecodeError):
-        return construct_error_message("JSON decoder error", error.args[0])
+        return construct_error_message("JSON decoder error", error.args[0], traceback)
 
     if isinstance(error, CommandParsingError):
-        return construct_error_message("parsing error", error.args[0])
+        return construct_error_message("parsing error", error.args[0], traceback)
 
     if isinstance(error, CommandExecutionError):
-        return construct_error_message("execution error", error.args[0])
+        return construct_error_message("execution error", error.args[0], traceback)
 
     if isinstance(error, CommandResponseError):
-        return construct_error_message("command response error", error.args[0])
+        return construct_error_message("command response error", error.args[0], traceback)
 
     # We should always receive one of the above errors, so the code should
     # never get to here. But we generate this response just in case something
     # very unexpected happens, or (more likely) the code is altered in such a
     # way that this line is it.
     msg = "An unknown error occurred, you should never reach this message."
-    return construct_error_message(error.__class__.__name__, msg)
+    return construct_error_message(error.__class__.__name__, msg, traceback)
 
 
 class CommandParsingError(Exception):
@@ -111,22 +117,6 @@ class CommandResponseError(Exception):
     pass
 
 
-@dataclass
-class DatabaseConnection:
-    """A connection to a database.
-
-    Attributes
-    ----------
-    engine :
-        The engine used to connect to the database.
-    schema :
-        The schema for the database.
-    """
-
-    engine: sqlalchemy.engine.Engine
-    schema: dict
-
-
 @dataclass(kw_only=True)
 class BaseCommand(ABC):
     """Base class for commands.
@@ -146,15 +136,13 @@ class BaseCommand(ABC):
     response_type: str
 
     @abstractmethod
-    def build_contents(self, databases: dict[str, DatabaseConnection], butler: Butler | None) -> dict:
+    def build_contents(self, data_center: DataCenter) -> dict:
         """Build the contents of the command.
 
         Parameters
         ----------
-        databases :
-            The database connections.
-        butler :
-            A connected Butler.
+        data_center :
+            Connections to databases, the Butler, and the EFD.
 
         Returns
         -------
@@ -163,7 +151,7 @@ class BaseCommand(ABC):
         """
         pass
 
-    def execute(self, databases: dict[str, DatabaseConnection], butler: Butler | None):
+    def execute(self, data_center: DataCenter):
         """Execute the command.
 
         This method does not return anything, buts sets the `result`,
@@ -171,18 +159,18 @@ class BaseCommand(ABC):
 
         Parameters
         ----------
-        databases :
-            The database connections.
-        butler :
-            A conencted Butler.
+        data_center :
+            Connections to databases, the Butler, and the EFD.
 
         """
-        self.result = {"type": self.response_type, "content": self.build_contents(databases, butler)}
+        self.result = {"type": self.response_type, "content": self.build_contents(data_center)}
 
-    def to_json(self):
+    def to_json(self, request_id: str | None = None):
         """Convert the `result` into JSON."""
         if self.result is None:
             raise CommandExecutionError(f"Null result for command {self.__class__.__name__}")
+        if request_id is not None:
+            self.result["requestId"] = request_id
         return json.dumps(self.result)
 
     @classmethod
@@ -191,7 +179,7 @@ class BaseCommand(ABC):
         BaseCommand.command_registry[name] = cls
 
 
-def execute_command(command_str: str, databases: dict[str, DatabaseConnection], butler: Butler | None) -> str:
+def execute_command(command_str: str, data_center: DataCenter) -> str:
     """Parse a JSON formatted string into a command and execute it.
 
     Command format:
@@ -206,10 +194,8 @@ def execute_command(command_str: str, databases: dict[str, DatabaseConnection], 
     ----------
     command_str :
         The JSON formatted command received from the user.
-    databases :
-        The database connections.
-    butler :
-        A connected Butler.
+    data_center :
+        Connections to databases, the Butler, and the EFD.
     """
     try:
         command_dict = json.loads(command_str)
@@ -217,7 +203,8 @@ def execute_command(command_str: str, databases: dict[str, DatabaseConnection], 
             raise CommandParsingError(f"Could not generate a valid command from {command_str}")
     except Exception as err:
         logging.exception("Error converting command to JSON.")
-        return error_msg(err)
+        traceback_string = traceback.format_exc()
+        return error_msg(err, traceback_string)
 
     try:
         if "name" not in command_dict.keys():
@@ -230,19 +217,27 @@ def execute_command(command_str: str, databases: dict[str, DatabaseConnection], 
         command = BaseCommand.command_registry[command_dict["name"]](**parameters)
 
     except Exception as err:
-        logging.exception("Error parsing command.")
-        return error_msg(CommandParsingError(f"'{err}' error while parsing command"))
+        logging.exception(f"Error parsing command {command_dict}")
+        traceback_string = traceback.format_exc()
+        return error_msg(CommandParsingError(f"'{err}' error while parsing command"), traceback_string)
 
     try:
-        command.execute(databases, butler)
+        command.execute(data_center)
     except Exception as err:
-        logging.exception("Error executing command.")
-        return error_msg(CommandExecutionError(f"{err} error executing command."))
+        logging.exception(f"Error executing command {command_dict}")
+        traceback_string = traceback.format_exc()
+        return error_msg(CommandExecutionError(f"{err} error executing command."), traceback_string)
 
     try:
-        result = command.to_json()
+        if "requestId" in command_dict:
+            result = command.to_json(command_dict["requestId"])
+        else:
+            result = command.to_json()
     except Exception as err:
         logging.exception("Error converting command response to JSON.")
-        return error_msg(CommandResponseError(f"{err} error converting command response to JSON."))
+        traceback_string = traceback.format_exc()
+        return error_msg(
+            CommandResponseError(f"{err} error converting command response to JSON."), traceback_string
+        )
 
     return result

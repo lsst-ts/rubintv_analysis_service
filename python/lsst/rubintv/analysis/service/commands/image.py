@@ -19,13 +19,34 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+from __future__ import annotations
+
+import logging
 from dataclasses import dataclass
 
-from .command import BaseCommand
+from lsst.rubintv.analysis.service.data import DataCenter
+
+from ..command import BaseCommand
+
+logger = logging.getLogger("lsst.rubintv.analysis.service.commands.image")
 
 
-@dataclass
-class ExampleButlerCommand(BaseCommand):
-    """Placeholder for butler commands"""
+@dataclass(kw_only=True)
+class LoadDetectorImageCommand(BaseCommand):
+    """Load an image from a data center.
 
-    pass
+    This command is not yet implemented, but will use the
+    `viewer.py` module, adapted from `https://github.com/fred3m/toyz`
+    to load image tiles and send them to the client to display
+    detector images.
+    """
+
+    database: str
+    detector: int
+    visit_id: int
+
+    def build_contents(self, data_center: DataCenter) -> dict:
+        # butler = data_center.butler
+        # assert butler is not None
+        # image = butler.get(, **data_id)
+        return {}
