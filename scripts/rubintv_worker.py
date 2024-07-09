@@ -37,7 +37,8 @@ default_config = os.path.join(pathlib.Path(__file__).parent.absolute(), "config.
 default_joins = os.path.join(pathlib.Path(__file__).parent.absolute(), "joins.yaml")
 logger = logging.getLogger("lsst.rubintv.analysis.server.worker")
 sdm_schemas_path = os.path.join(os.path.expandvars("$SDM_SCHEMAS_DIR"), "yml")
-credentials_path = os.path.join(os.path.expanduser("~"), ".lsst", "postgres-credentials.txt")
+prod_credentials_path = os.path.join("/etc/secrets", "postgres-credentials.txt")
+test_credentials_path = os.path.join(os.path.expanduser("~"), ".lsst", "postgres-credentials.txt")
 
 
 class UniversalToVisit(DataMatch):
@@ -62,7 +63,7 @@ def main():
         "--location",
         default="usdf",
         type=str,
-        help="Location of the worker (either 'summit' or 'usdf')",
+        help="Location of the worker (either 'summit', 'usdf', or 'dev')",
     )
     parser.add_argument(
         "--log",
@@ -111,8 +112,13 @@ def main():
     server = ""
     if args.location.lower() == "summit":
         server = config["locations"]["summit"]
+        credentials_path = prod_credentials_path
     elif args.location.lower() == "usdf":
         server = config["locations"]["usdf"]
+        credentials_path = prod_credentials_path
+    elif args.location.lower() == "dev":
+        server = config["locations"]["usdf"]
+        credentials_path = test_credentials_path
     else:
         raise ValueError(f"Invalid location: {args.location}, must be either 'summit' or 'usdf'")
 
