@@ -136,7 +136,11 @@ class EqualityQuery(Query):
 
     @staticmethod
     def from_dict(query_dict: dict[str, Any]) -> EqualityQuery:
-        return EqualityQuery(**query_dict)
+        return EqualityQuery(
+            column=f'{query_dict["column"]["schema"]}.{query_dict["column"]["name"]}',
+            operator=query_dict["operator"],
+            value=query_dict["value"],
+        )
 
 
 class ParentQuery(Query):

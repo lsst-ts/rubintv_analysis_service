@@ -39,6 +39,9 @@ logger = logging.getLogger("lsst.rubintv.analysis.server.worker")
 sdm_schemas_path = os.path.join(os.path.expandvars("$SDM_SCHEMAS_DIR"), "yml")
 prod_credentials_path = os.path.join("/etc/secrets", "postgres-credentials.txt")
 test_credentials_path = os.path.join(os.path.expanduser("~"), ".lsst", "postgres-credentials.txt")
+summit_users_path = "/usr/share/worker/configs"
+usdf_users_path = "/usr/share/worker/configs"
+dev_users_path = "/sdf/home/f/fred3m/u/data/dev_users"
 
 
 class UniversalToVisit(DataMatch):
@@ -113,12 +116,15 @@ def main():
     if args.location.lower() == "summit":
         server = config["locations"]["summit"]
         credentials_path = prod_credentials_path
+        user_path = summit_users_path
     elif args.location.lower() == "usdf":
         server = config["locations"]["usdf"]
         credentials_path = prod_credentials_path
+        user_path = usdf_users_path
     elif args.location.lower() == "dev":
         server = config["locations"]["usdf"]
         credentials_path = test_credentials_path
+        user_path = dev_users_path
     else:
         raise ValueError(f"Invalid location: {args.location}, must be either 'summit' or 'usdf'")
 
@@ -159,7 +165,7 @@ def main():
     # Create the DataCenter that keeps track of all data sources.
     # This will have to be updated every time we want to
     # change/add a new data source.
-    data_center = DataCenter(schemas=schemas, butlers=butlers, efd_client=efd_client)
+    data_center = DataCenter(schemas=schemas, butlers=butlers, efd_client=efd_client, user_path=user_path)
 
     # Run the client and connect to rubinTV via websockets
     logger.info("Initializing worker")

@@ -21,4 +21,5 @@
 
 from .butler import *
 from .db import *
+from .file import *
 from .image import *

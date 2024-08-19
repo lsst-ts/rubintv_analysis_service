@@ -143,16 +143,19 @@ class DataCenter:
         An EFD client instance.
     """
 
+    user_path: str
     schemas: dict[str, ConsDbSchema]
     butlers: dict[str, Butler] | None = None
     efd_client: EfdClient | None = None
 
     def __init__(
         self,
+        user_path: str,
         schemas: dict[str, ConsDbSchema],
         butlers: dict[str, Butler] | None = None,
         efd_client: EfdClient | None = None,
     ):
+        self.user_path = user_path
         self.schemas = schemas
         self.butlers = butlers
         self.efdClient = efd_client

@@ -218,7 +218,7 @@ class RasTestCase(TestCase):
 
         # Create the datacenter
         self.database = ConsDbSchema(schema=schema, engine=engine, join_templates=joins)
-        self.data_center = DataCenter(schemas={"testdb": self.database})
+        self.data_center = DataCenter(schemas={"testdb": self.database}, user_path="")
 
     def tearDown(self) -> None:
         self.db_file.close()
