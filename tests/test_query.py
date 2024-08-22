@@ -86,21 +86,23 @@ class TestQuery(utils.RasTestCase):
 
         # dec > 0 (and is not None)
         query1 = {
-            "name": "EqualityQuery",
-            "content": {
-                "column": "exposure.dec",
-                "operator": "gt",
-                "value": 0,
+            "type": "EqualityQuery",
+            "field": {
+                "schema": "exposure",
+                "name": "dec",
             },
+            "leftOperator": "lt",
+            "leftValue": 0,
         }
         # ra > 60 (and is not None)
         query2 = {
-            "name": "EqualityQuery",
-            "content": {
-                "column": "exposure.ra",
-                "operator": "gt",
-                "value": 60,
+            "type": "EqualityQuery",
+            "field": {
+                "schema": "exposure",
+                "name": "ra",
             },
+            "leftOperator": "lt",
+            "leftValue": 60,
         }
 
         # Test 1: dec > 0 (and is not None)
@@ -117,11 +119,9 @@ class TestQuery(utils.RasTestCase):
 
         # Test 2: dec > 0 and ra > 60 (and neither is None)
         query = {
-            "name": "ParentQuery",
-            "content": {
-                "operator": "AND",
-                "children": [query1, query2],
-            },
+            "type": "ParentQuery",
+            "operator": "AND",
+            "children": [query1, query2],
         }
         result = self.database.query(["exposure.ra", "exposure.dec"], query=lras.query.Query.from_dict(query))
         truth = data[[False, False, False, False, False, False, False, False, True, True]]
@@ -135,20 +135,16 @@ class TestQuery(utils.RasTestCase):
 
         # Test 3: dec <= 0 or ra > 60 (and neither is None)
         query = {
-            "name": "ParentQuery",
-            "content": {
-                "operator": "OR",
-                "children": [
-                    {
-                        "name": "ParentQuery",
-                        "content": {
-                            "operator": "NOT",
-                            "children": [query1],
-                        },
-                    },
-                    query2,
-                ],
-            },
+            "type": "ParentQuery",
+            "operator": "OR",
+            "children": [
+                {
+                    "type": "ParentQuery",
+                    "operator": "NOT",
+                    "children": [query1],
+                },
+                query2,
+            ],
         }
 
         result = self.database.query(["exposure.ra", "exposure.dec"], query=lras.query.Query.from_dict(query))
@@ -163,11 +159,9 @@ class TestQuery(utils.RasTestCase):
 
         # Test 4: dec > 0 XOR ra > 60
         query = {
-            "name": "ParentQuery",
-            "content": {
-                "operator": "XOR",
-                "children": [query1, query2],
-            },
+            "type": "ParentQuery",
+            "operator": "XOR",
+            "children": [query1, query2],
         }
         result = self.database.query(["exposure.ra", "exposure.dec"], query=lras.query.Query.from_dict(query))
         truth = data[[False, False, False, False, False, True, False, False, False, False]]
@@ -184,12 +178,13 @@ class TestQuery(utils.RasTestCase):
 
         # Test equality
         query = {
-            "name": "EqualityQuery",
-            "content": {
-                "column": "exposure.physical_filter",
-                "operator": "eq",
-                "value": "DECam r-band",
+            "type": "EqualityQuery",
+            "field": {
+                "schema": "exposure",
+                "name": "physical_filter",
             },
+            "rightOperator": "eq",
+            "rightValue": "DECam r-band",
         }
         result = self.database.query(["exposure.physical_filter"], query=lras.query.Query.from_dict(query))
         truth = data[[False, False, False, False, False, False, True, False, False, False]]
@@ -202,12 +197,13 @@ class TestQuery(utils.RasTestCase):
 
         # Test "startswith"
         query = {
-            "name": "EqualityQuery",
-            "content": {
-                "column": "exposure.physical_filter",
-                "operator": "startswith",
-                "value": "DECam",
+            "type": "EqualityQuery",
+            "field": {
+                "schema": "exposure",
+                "name": "physical_filter",
             },
+            "rightOperator": "startswith",
+            "rightValue": "DECam",
         }
         result = self.database.query(["exposure.physical_filter"], query=lras.query.Query.from_dict(query))
         truth = data[[False, False, False, False, False, True, True, True, True, True]]
@@ -220,12 +216,13 @@ class TestQuery(utils.RasTestCase):
 
         # Test "endswith"
         query = {
-            "name": "EqualityQuery",
-            "content": {
-                "column": "exposure.physical_filter",
-                "operator": "endswith",
-                "value": "r-band",
+            "type": "EqualityQuery",
+            "field": {
+                "schema": "exposure",
+                "name": "physical_filter",
             },
+            "rightOperator": "endswith",
+            "rightValue": "r-band",
         }
         result = self.database.query(["exposure.physical_filter"], query=lras.query.Query.from_dict(query))
         truth = data[[False, True, False, False, False, False, True, False, False, False]]
@@ -238,12 +235,13 @@ class TestQuery(utils.RasTestCase):
 
         # Test "like"
         query = {
-            "name": "EqualityQuery",
-            "content": {
-                "column": "exposure.physical_filter",
-                "operator": "contains",
-                "value": "T r",
+            "type": "EqualityQuery",
+            "field": {
+                "schema": "exposure",
+                "name": "physical_filter",
             },
+            "rightOperator": "contains",
+            "rightValue": "T r",
         }
         result = self.database.query(["exposure.physical_filter"], query=lras.query.Query.from_dict(query))
         truth = data[[False, True, False, False, False, False, False, False, False, False]]
@@ -259,12 +257,13 @@ class TestQuery(utils.RasTestCase):
 
         # Test <
         query1 = {
-            "name": "EqualityQuery",
-            "content": {
-                "column": "exposure.obs_start",
-                "operator": "lt",
-                "value": "2023-05-19 23:23:23",
+            "type": "EqualityQuery",
+            "field": {
+                "schema": "exposure",
+                "name": "obs_start",
             },
+            "rightOperator": "lt",
+            "rightValue": "2023-05-19 23:23:23",
         }
         result = self.database.query(["exposure.obs_start"], query=lras.query.Query.from_dict(query1))
         truth = data[[True, True, True, False, False, True, True, True, True, True]]
@@ -277,12 +276,13 @@ class TestQuery(utils.RasTestCase):
 
         # Test >
         query2 = {
-            "name": "EqualityQuery",
-            "content": {
-                "column": "exposure.obs_start",
-                "operator": "gt",
-                "value": "2023-05-01 23:23:23",
+            "type": "EqualityQuery",
+            "field": {
+                "schema": "exposure",
+                "name": "obs_start",
             },
+            "leftOperator": "lt",
+            "leftValue": "2023-05-01 23:23:23",
         }
         result = self.database.query(["exposure.obs_start"], query=lras.query.Query.from_dict(query2))
         truth = data[[True, True, True, True, True, False, False, False, False, False]]
@@ -295,11 +295,9 @@ class TestQuery(utils.RasTestCase):
 
         # Test in range
         query3 = {
-            "name": "ParentQuery",
-            "content": {
-                "operator": "AND",
-                "children": [query1, query2],
-            },
+            "type": "ParentQuery",
+            "operator": "AND",
+            "children": [query1, query2],
         }
         result = self.database.query(["exposure.obs_start"], query=lras.query.Query.from_dict(query3))
         truth = data[[True, True, True, False, False, False, False, False, False, False]]
@@ -322,29 +320,29 @@ class TestQuery(utils.RasTestCase):
 
         # dec > 0 (and is not None)
         query1 = {
-            "name": "EqualityQuery",
-            "content": {
-                "column": "exposure.dec",
-                "operator": "gt",
-                "value": 0,
+            "type": "EqualityQuery",
+            "field": {
+                "schema": "exposure",
+                "name": "dec",
             },
+            "leftOperator": "lt",
+            "leftValue": 0,
         }
         # exposure time == 30 (and is not None)
         query2 = {
-            "name": "EqualityQuery",
-            "content": {
-                "column": "visit1_quicklook.exp_time",
-                "operator": "eq",
-                "value": 30,
+            "type": "EqualityQuery",
+            "field": {
+                "schema": "visit1_quicklook",
+                "name": "exp_time",
             },
+            "rightOperator": "eq",
+            "rightValue": 30,
         }
         # Intersection of the two queries
         query3 = {
-            "name": "ParentQuery",
-            "content": {
-                "operator": "AND",
-                "children": [query1, query2],
-            },
+            "type": "ParentQuery",
+            "operator": "AND",
+            "children": [query1, query2],
         }
 
         valid = (

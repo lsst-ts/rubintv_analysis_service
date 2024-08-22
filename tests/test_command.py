@@ -91,12 +91,13 @@ class TestLoadColumnsCommand(TestCommand):
                     "exposure.dec",
                 ],
                 "query": {
-                    "name": "EqualityQuery",
-                    "content": {
-                        "column": "visit1_quicklook.exp_time",
-                        "operator": "eq",
-                        "value": 30,
+                    "type": "EqualityQuery",
+                    "field": {
+                        "schema": "visit1_quicklook",
+                        "name": "exp_time",
                     },
+                    "rightOperator": "eq",
+                    "rightValue": 30,
                 },
             },
         }
