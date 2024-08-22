@@ -77,6 +77,7 @@ class LoadDirectoryCommand(BaseCommand):
     response_type
         The type of response to send back to the client.
     """
+
     path: list[str]
     response_type: str = "directory files"
 
@@ -121,6 +122,7 @@ class CreateDirectoryCommand(BaseCommand):
     name
         The name of the new directory to create.
     """
+
     path: list[str]
     name: str
     response_type: str = "directory created"
@@ -157,6 +159,7 @@ class RenameFileCommand(BaseCommand):
     new_name
         The new name to assign to the file or directory.
     """
+
     path: list[str]
     new_name: str
     response_type: str = "file renamed"
@@ -197,6 +200,7 @@ class DeleteFileCommand(BaseCommand):
     path
         The path to the file or directory to delete.
     """
+
     path: list[str]
     response_type: str = "file deleted"
 
@@ -236,6 +240,7 @@ class DuplicateFileCommand(BaseCommand):
     path
         The path to the file or directory to duplicate
     """
+
     path: list[str]
     response_type: str = "file duplicated"
 
@@ -293,6 +298,7 @@ class MoveFileCommand(BaseCommand):
     destination_path
         The path to move the file or directory to.
     """
+
     source_path: list[str]
     destination_path: list[str]
     response_type: str = "file moved"
@@ -343,6 +349,7 @@ class SaveFileCommand(BaseCommand):
     content
         The content to write to the file.
     """
+
     path: list[str]
     content: str
     response_type: str = "file saved"
@@ -381,6 +388,7 @@ class LoadFileCommand(BaseCommand):
         The maximum allowed size of the file in bytes.
         This prevents accendentally loading large files.
     """
+
     path: list[str]
     max_size: int = MAX_FILE_SIZE
     response_type: str = "file content"

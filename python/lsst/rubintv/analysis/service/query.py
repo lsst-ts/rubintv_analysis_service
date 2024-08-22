@@ -38,6 +38,19 @@ class QueryError(Exception):
     pass
 
 
+left_operator = {
+    "eq": "eq",
+    "ne": "ne",
+    "lt": "gt",
+    "lte": "gte",
+    "gt": "lt",
+    "gte": "lte",
+    "starts with": "starts with",
+    "ends with": "ends with",
+    "contains": "contains",
+}
+
+
 @dataclass
 class QueryResult:
     """The result of a query.
@@ -87,10 +100,49 @@ class Query(ABC):
             to initialize the query.
         """
         try:
-            if query_dict["name"] == "EqualityQuery":
-                return EqualityQuery.from_dict(query_dict["content"])
-            elif query_dict["name"] == "ParentQuery":
-                return ParentQuery.from_dict(query_dict["content"])
+            if query_dict["type"] == "EqualityQuery":
+                if "leftOperator" not in query_dict:
+                    return EqualityQuery.from_dict(
+                        {
+                            "column": query_dict["field"],
+                            "operator": query_dict["rightOperator"],
+                            "value": query_dict["rightValue"],
+                        }
+                    )
+                if "rightOperator" not in query_dict:
+                    return EqualityQuery.from_dict(
+                        {
+                            "column": query_dict["field"],
+                            "operator": left_operator[query_dict["leftOperator"]],
+                            "value": query_dict["leftValue"],
+                        }
+                    )
+                return ParentQuery.from_dict(
+                    {
+                        "children": [
+                            {
+                                "type": "EqualityQuery",
+                                "field": query_dict["field"],
+                                "leftOperator": query_dict["leftOperator"],
+                                "leftValue": query_dict["leftValue"],
+                            },
+                            {
+                                "type": "EqualityQuery",
+                                "field": query_dict["field"],
+                                "rightOperator": query_dict["rightOperator"],
+                                "rightValue": query_dict["rightValue"],
+                            },
+                        ],
+                        "operator": "AND",
+                    }
+                )
+            elif query_dict["type"] == "ParentQuery":
+                return ParentQuery.from_dict(
+                    {
+                        "children": query_dict["children"],
+                        "operator": query_dict["operator"],
+                    }
+                )
         except Exception:
             raise QueryError(f"Failed to parse query: {query_dict}")
 
