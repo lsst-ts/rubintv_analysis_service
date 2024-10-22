@@ -39,8 +39,8 @@ logger = logging.getLogger("lsst.rubintv.analysis.server.worker")
 sdm_schemas_path = os.path.join(os.path.expandvars("$SDM_SCHEMAS_DIR"), "yml")
 prod_credentials_path = os.path.join("/etc/secrets", "postgres-credentials.txt")
 test_credentials_path = os.path.join(os.path.expanduser("~"), ".lsst", "postgres-credentials.txt")
-summit_users_path = "/usr/share/worker/configs"
-usdf_users_path = "/usr/share/worker/configs"
+summit_users_path = "/var/ddv-config"
+usdf_users_path = "/var/ddv-config"
 dev_users_path = "/sdf/home/f/fred3m/u/data/dev_users"
 
 
