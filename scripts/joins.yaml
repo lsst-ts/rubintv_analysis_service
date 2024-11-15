@@ -24,6 +24,22 @@ joins:
       ccdvisit1:
         - visit_id
 
+  # exposure and exposure_quicklook
+  - type: inner
+    matches:
+      exposure:
+        - exposure_id
+      exposure_quicklook:
+        - exposure_id
+
+  # exposure and ccdexposure_quicklook
+  - type: inner
+    matches:
+      exposure:
+        - exposure_id
+      ccdexposure_quicklook:
+        - exposure_id
+
   # ccdexposure and ccdexposure_camera
   - type: inner
     matches:

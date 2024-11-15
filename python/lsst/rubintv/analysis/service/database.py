@@ -34,8 +34,10 @@ logger = logging.getLogger("lsst.rubintv.analysis.service.database")
 # Exposure tables currently in the schema
 exposure_tables = [
     "exposure",
+    "exposure_quicklook",
     "ccdexposure",
     "ccdexposure_camera",
+    "ccdexposure_quicklook",
 ]
 
 # Tables in the schema for single visit exposures
@@ -54,6 +56,7 @@ flex_tables = [
     "exposure_flexdata_schema",
     "ccdexposure_flexdata",
     "ccdexposure_flexdata_schema",
+    "ccdexposure_quicklook",
 ]
 
 
@@ -120,6 +123,12 @@ class JoinBuilder:
         for join in self.joins:
             tables = list(join["matches"].keys())
             t1, t2 = tables[0], tables[1]
+            if t1 not in self.tables.keys() or t2 not in self.tables.keys():
+                # The tables have likely been added to the schema
+                # but not yet implemented in the database,
+                # so the joins exist but there are no tables to join yet.
+                logger.warning(f"Skipping join between tables {t1} and {t2}")
+                continue
             join_columns = list(zip(join["matches"][t1], join["matches"][t2]))
             graph[t1][t2] = join_columns
             graph[t2][t1] = [(col2, col1) for col1, col2 in join_columns]
@@ -219,6 +228,34 @@ class JoinBuilder:
         return select_from
 
 
+def _removeSchemaTable(schema, table_name):
+    """Remove a table from the schema
+
+    We do this because the ConsDbSchema contains the tables and columns
+    that are sent to the DDV. So removing a table here ensures that
+    the DDV does not try to query a table that does not exist in the database.
+
+    Parameters
+    ----------
+    schema :
+        The schema to remove the table from.
+    table_name :
+        The name of the table to remove.
+
+    Returns
+    -------
+    result :
+        The schema with the table removed.
+    """
+    schema = schema.copy()
+    for table in schema["tables"]:
+        if table["name"] == table_name:
+            logger.warning(f"Removing table {table_name} from schema")
+            schema["tables"].remove(table)
+            break
+    return schema
+
+
 class ConsDbSchema:
     """A schema (instrument) in the consolidated database.
 
@@ -246,21 +283,30 @@ class ConsDbSchema:
         self.metadata = sqlalchemy.MetaData()
 
         self.tables = {}
-        for table in schema["tables"]:
+        schema_tables = self.schema["tables"].copy()
+        for table in schema_tables:
             if (
                 table["name"] not in exposure_tables
                 and table["name"] not in visit1_tables
                 and table["name"] not in flex_tables
             ):
                 # A new table was added to the schema and cannot be parsed
-                logger.warn(f"Table {table['name']} has not been implemented in the RubinTV analysis service")
+                msg = f"Table {table['name']} has not been implemented in the RubinTV analysis service"
+                logger.warning(msg)
+                _removeSchemaTable(self.schema, table["name"])
             else:
-                self.tables[table["name"]] = sqlalchemy.Table(
-                    table["name"],
-                    self.metadata,
-                    autoload_with=self.engine,
-                    schema=schema["name"],
-                )
+                try:
+                    self.tables[table["name"]] = sqlalchemy.Table(
+                        table["name"],
+                        self.metadata,
+                        autoload_with=self.engine,
+                        schema=schema["name"],
+                    )
+                except sqlalchemy.exc.NoSuchTableError:
+                    # The table is in sdm_schemas but has not yet been added
+                    # to the database.
+                    logger.warning(f"Table {table['name']} from schema not found in database")
+                    _removeSchemaTable(self.schema, table["name"])
 
         self.joins = JoinBuilder(self.tables, join_templates)
 
