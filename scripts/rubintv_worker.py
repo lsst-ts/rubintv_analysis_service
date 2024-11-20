@@ -78,6 +78,12 @@ def main():
         default="WARNING",
         help="Set the logging level of the remainder of packages (DEBUG, INFO, WARNING, ERROR, CRITICAL).",
     )
+    parser.add_argument(
+        "--database",
+        default="exposurelog",
+        help="The name of the database to connect to."
+             "It will likely never need to be changed, but including it as an option just in case.",
+    )
     args = parser.parse_args()
 
     # Configure logging for all modules
@@ -132,7 +138,7 @@ def main():
         credentials = file.readlines()
     for credential in credentials:
         _server, _, database, user, password = credential.split(":")
-        if _server == server:
+        if _server == server and database == args.database:
             password = password.strip()
             break
     else:
