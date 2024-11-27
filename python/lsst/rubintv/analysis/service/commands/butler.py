@@ -21,6 +21,8 @@
 
 from __future__ import annotations
 
+import base64
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -30,6 +32,8 @@ if TYPE_CHECKING:
     from lsst.afw.cameraGeom import Camera
 
     from ..data import DataCenter
+
+logger = logging.getLogger("lsst.rubintv.analysis.service.commands.butler")
 
 
 def get_camera(instrument_name: str) -> Camera:
@@ -124,3 +128,63 @@ class LoadImageCommand(BaseCommand):
         return {
             "image": image.array,
         }
+
+
+@dataclass(kw_only=True)
+class GetFitsImageCommand(BaseCommand):
+    """Load an image from the Butler.
+
+    Attributes
+    ----------
+    collection : str
+        The name of the collection to load the image from.
+    image_name : str
+        The dataset_type of the image to get.
+    data_id : dict
+        The data ID of the image. Depending on the type of image this could
+        include things like "band" or "visit" or "detector".
+    compress : bool
+        Compress the image before sending.
+    """
+
+    repo: str
+    image_name: str
+    collection: dict
+    data_id: dict
+    compress: bool
+    response_type: str = "fits"
+
+    def build_contents(self, data_center: DataCenter) -> dict:
+        from lsst.afw.fits import MemFileManager
+
+        # Load the image from the Butler
+        assert data_center.butlers is not None
+        logger.info("Querying butler...")
+        exposure = data_center.butlers[self.repo].get(
+            self.image_name, collections=[self.collection], **self.data_id
+        )
+        logger.info("Received exposure.")
+
+        manager = MemFileManager()
+        opts = dict()
+        if self.compress:
+            from lsst.afw.fits import ImageCompressionOptions, ImageScalingOptions, ImageWriteOptions
+
+            logger.info("Configuring compression.")
+            quantize = 10.0
+            compression = ImageCompressionOptions(ImageCompressionOptions.RICE, True, 0.0)
+            scaling = ImageScalingOptions(ImageScalingOptions.STDEV_BOTH, 32, quantizeLevel=quantize)
+            opts["imageOptions"] = ImageWriteOptions(compression, scaling)
+            opts["maskOptions"] = ImageWriteOptions(compression)
+            opts["varianceOptions"] = opts["imageOptions"]
+        exposure.writeFits(manager, **opts)
+
+        logger.info("Encoding exposure...")
+        content = base64.b64encode(manager.getData()).decode("ascii")
+
+        return {
+            "fits": content,
+        }
+
+
+GetFitsImageCommand.register("get fits image")

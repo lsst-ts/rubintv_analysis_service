@@ -10,5 +10,7 @@ schemas:
 repos:
   - /repo/main
   - embargo_or4
+butlers:
+  - embargo
 #efd:
 # url: connection info here
