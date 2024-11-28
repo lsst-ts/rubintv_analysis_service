@@ -159,6 +159,7 @@ def main():
     butlers: dict[str, Butler] | None = None
     if "butlers" in config:
         logger.info("Connecting to Butlers")
+        butlers = {}
         for repo in config["butlers"]:
             butlers[repo] = Butler(repo)  # type: ignore
 

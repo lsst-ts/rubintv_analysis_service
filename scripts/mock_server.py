@@ -51,6 +51,7 @@ class WebSocketHandler(tornado.websocket.WebSocketHandler):
     workers: dict[str, WorkerPod] = dict()  # Keep track of connected worker pods
     clients: dict[str, WebSocketHandler] = dict()  # Keep track of connected clients
     queue: list[QueueItem] = list()  # Queue of messages to be processed
+    max_message_size: int = 100 * 1024 * 1024  # Maximum message size
 
     @classmethod
     def urls(cls) -> list[tuple[str, type[tornado.web.RequestHandler], dict[str, str]]]:

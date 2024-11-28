@@ -24,6 +24,7 @@ from typing import cast
 
 import astropy.table
 import lsst.rubintv.analysis.service as lras
+import pytest
 import utils
 
 
@@ -186,3 +187,23 @@ class TestCommandErrors(TestCommand):
             content,
             "execution error",
         )
+
+
+# Only runs if butler instantiated
+@pytest.mark.skip(reason="Needs butler access")
+class TestSendFitsImageCommand(TestCommand):
+    def test_send_fits_image_command(self):
+        command = {
+            "name": "get fits image",
+            "parameters": {
+                "repo": "embargo",
+                "collection": "u/kadrlica/binCalexp4",
+                "image_name": "calexpBinned8",
+                "data_id": {"instrument": "LSSTComCam", "detector": 3, "visit": 2024110900185},
+            },
+        }
+
+        print(lras.command.BaseCommand.command_registry)
+        content = self.execute_command(command, "get fits image")
+        length = len(content["fits"])
+        self.assertEqual(length, 4608000)
