@@ -11,6 +11,6 @@ repos:
   - /repo/main
   - embargo_or4
 butlers:
-  - embargo
+  - s3://embargo@rubin-summit-users/butler.yaml
 #efd:
 # url: connection info here
