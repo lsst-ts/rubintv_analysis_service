@@ -84,7 +84,7 @@ class Worker:
             """Message received from the server."""
             logger.info(f"Executing command: {message}")
             response = execute_command(message, self.data_center)
-            logger.info(f"Sending response")
+            logger.info("Sending response")
             ws.send(response)
 
         logger.connection(f"Connecting to rubinTV at {self._address}:{self._port}")

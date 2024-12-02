@@ -40,9 +40,11 @@ logger = logging.getLogger("lsst.rubintv.analysis.server.worker")
 sdm_schemas_path = os.path.join(os.path.expandvars("$SDM_SCHEMAS_DIR"), "yml")
 test_credentials_path = os.path.join(os.path.expanduser("~"), ".lsst", "postgres-credentials.txt")
 
+
 class UniversalToVisit(DataMatch):
     def get_join(self):
         return
+
 
 class LocationConfig:
     """Location based configuration for the worker.
@@ -58,6 +60,7 @@ class LocationConfig:
     butlers : dict[str, dict[str, str]]
         A dictionary of butler configurations.
     """
+
     users_path: str
     credentials_path: str
     consdb: str
@@ -65,8 +68,8 @@ class LocationConfig:
     schemas: dict[str, str]
     efd_url: str | None
 
-    def __init__(self, location:str, yaml_config: dict[str, Any]):
-        config = yaml_config['locations'][location]
+    def __init__(self, location: str, yaml_config: dict[str, Any]):
+        config = yaml_config["locations"][location]
 
         # Set location-specific attributes
         self.users_path = config["users_path"]
@@ -118,7 +121,7 @@ def main():
         "--database",
         default="exposurelog",
         help="The name of the database to connect to."
-             "It will likely never need to be changed, but including it as an option just in case.",
+        "It will likely never need to be changed, but including it as an option just in case.",
     )
     args = parser.parse_args()
 
@@ -196,10 +199,7 @@ def main():
     # This will have to be updated every time we want to
     # change/add a new data source.
     data_center = DataCenter(
-        schemas=schemas,
-        butlers=butlers,
-        efd_client=efd_client,
-        user_path=config.users_path
+        schemas=schemas, butlers=butlers, efd_client=efd_client, user_path=config.users_path
     )
 
     # Run the client and connect to rubinTV via websockets
