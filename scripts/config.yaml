@@ -5,23 +5,23 @@ locations:
     consdb: usdf-summitdb.slac.stanford.edu
     butlers:
       embargo: embargo
-    #efd_url: connection info here
+    # efd_url: connection info here
   summit:
     users_path: /var/ddv-config
     credentials_path: /etc/secrets/postgres-credentials.txt
     consdb: postgresdb01.cp.lsst.org
     butlers:
       embargo: s3://embargo@rubin-summit-users/butler.yaml
-    #efd_url: connection info here
+    # efd_url: connection info here
   usdf:
     users_path: /var/ddv-config
     credentials_path: /etc/secrets/postgres-credentials.txt
     consdb: usdf-summitdb.slac.stanford.edu
     butlers:
       embargo: s3://embargo@usdf-summit-users/butler.yaml
-    #efd_url: connection info here
+    # efd_url: connection info here
 schemas:
   cdb_latiss: cdb_latiss.yaml
   cdb_lsstcomcam: cdb_lsstcomcam.yaml
   cdb_lsstcomcamsim: cdb_lsstcomcamsim.yaml
-#  cdb_lsstcam: cdb_lsstcam.yaml
+  # cdb_lsstcam: cdb_lsstcam.yaml
