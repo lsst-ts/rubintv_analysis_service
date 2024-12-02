@@ -23,6 +23,7 @@ import argparse
 import logging
 import os
 import pathlib
+from typing import Any
 
 import sqlalchemy
 import yaml
@@ -37,16 +38,51 @@ default_config = os.path.join(pathlib.Path(__file__).parent.absolute(), "config.
 default_joins = os.path.join(pathlib.Path(__file__).parent.absolute(), "joins.yaml")
 logger = logging.getLogger("lsst.rubintv.analysis.server.worker")
 sdm_schemas_path = os.path.join(os.path.expandvars("$SDM_SCHEMAS_DIR"), "yml")
-prod_credentials_path = os.path.join("/etc/secrets", "postgres-credentials.txt")
 test_credentials_path = os.path.join(os.path.expanduser("~"), ".lsst", "postgres-credentials.txt")
-summit_users_path = "/var/ddv-config"
-usdf_users_path = "/var/ddv-config"
-dev_users_path = "/sdf/home/f/fred3m/u/data/dev_users"
-
 
 class UniversalToVisit(DataMatch):
     def get_join(self):
         return
+
+class LocationConfig:
+    """Location based configuration for the worker.
+
+    Attributes
+    ----------
+    users_path : str
+        Path to the user file.
+    credentials_path : str
+        Path to the credentials file.
+    consdb : str
+        The name of the consdb to connect to.
+    butlers : dict[str, dict[str, str]]
+        A dictionary of butler configurations.
+    """
+    users_path: str
+    credentials_path: str
+    consdb: str
+    butlers: dict[str, dict[str, str]]
+    schemas: dict[str, str]
+    efd_url: str | None
+
+    def __init__(self, location:str, yaml_config: dict[str, Any]):
+        config = yaml_config['locations'][location]
+
+        # Set location-specific attributes
+        self.users_path = config["users_path"]
+        try:
+            self.credentials_path = config["credentials_path"]
+        except KeyError:
+            self.credentials_path = test_credentials_path
+        self.consdb = config["consdb"]
+        self.butlers = config["butlers"]
+        try:
+            self.efd_url = config["efd_url"]
+        except KeyError:
+            self.efd_url = None
+
+        # Set other attributes
+        self.schemas = yaml_config["schemas"]
 
 
 def main():
@@ -86,6 +122,10 @@ def main():
     )
     args = parser.parse_args()
 
+    # Ensure that the location is valid
+    if args.location.lower() not in ["summit", "usdf", "dev"]:
+        raise ValueError(f"Invalid location: {args.location}, must be either 'summit', 'usdf' or 'dev'")
+
     # Configure logging for all modules
     log_level = getattr(logging, args.log_all.upper(), None)
     if not isinstance(log_level, int):
@@ -112,67 +152,55 @@ def main():
     # Load the configuration and join files
     logger.info("Loading config")
     with open(args.config, "r") as file:
-        config = yaml.safe_load(file)
+        config = LocationConfig(args.location.lower(), yaml.safe_load(file))
     with open(args.joins, "r") as file:
         joins = yaml.safe_load(file)["joins"]
 
     # Set the database URL based on the location
     logger.info("Connecting to the database")
-    server = ""
-    if args.location.lower() == "summit":
-        server = config["locations"]["summit"]
-        credentials_path = prod_credentials_path
-        user_path = summit_users_path
-    elif args.location.lower() == "usdf":
-        server = config["locations"]["usdf"]
-        credentials_path = prod_credentials_path
-        user_path = usdf_users_path
-    elif args.location.lower() == "dev":
-        server = config["locations"]["usdf"]
-        credentials_path = test_credentials_path
-        user_path = dev_users_path
-    else:
-        raise ValueError(f"Invalid location: {args.location}, must be either 'summit' or 'usdf'")
 
-    with open(credentials_path, "r") as file:
+    with open(config.credentials_path, "r") as file:
         credentials = file.readlines()
     for credential in credentials:
         _server, _, database, user, password = credential.split(":")
-        if _server == server and database == args.database:
+        if _server == config.consdb and database == args.database:
             password = password.strip()
             break
     else:
-        raise ValueError(f"Could not find credentials for {server}")
-    database_url = f"postgresql://{user}:{password}@{server}/{database}"
+        raise ValueError(f"Could not find credentials for {config.consdb} and {args.database}")
+    database_url = f"postgresql://{user}:{password}@{config.consdb}/{database}"
     engine = sqlalchemy.create_engine(database_url)
 
     # Initialize the data center that provides access to various data sources
     schemas: dict[str, ConsDbSchema] = {}
 
-    for name, filename in config["schemas"].items():
+    for name, filename in config.schemas.items():
         full_path = os.path.join(sdm_schemas_path, filename)
         with open(full_path, "r") as file:
             schema = yaml.safe_load(file)
             schemas[name] = ConsDbSchema(schema=schema, engine=engine, join_templates=joins)
 
     # Load the Butler (if one is available)
-    butlers: dict[str, Butler] | None = None
-    if "butlers" in config:
-        logger.info("Connecting to Butlers")
-        butlers = {}
-        for repo in config["butlers"]:
-            butlers[repo] = Butler(repo)  # type: ignore
+    logger.info("Connecting to Butlers")
+    butlers = {}
+    for repo_name, repo in config.butlers.items():
+        butlers[repo_name] = Butler(repo)
 
     # Load the EFD client (if one is available)
     efd_client: EfdClient | None = None
-    if "efd" in config:
+    if config.efd_url is not None:
         logger.info("Connecting to EFD")
         raise NotImplementedError("EFD client not yet implemented")
 
     # Create the DataCenter that keeps track of all data sources.
     # This will have to be updated every time we want to
     # change/add a new data source.
-    data_center = DataCenter(schemas=schemas, butlers=butlers, efd_client=efd_client, user_path=user_path)
+    data_center = DataCenter(
+        schemas=schemas,
+        butlers=butlers,
+        efd_client=efd_client,
+        user_path=config.users_path
+    )
 
     # Run the client and connect to rubinTV via websockets
     logger.info("Initializing worker")
