@@ -64,7 +64,7 @@ class LocationConfig:
     users_path: str
     credentials_path: str
     consdb: str
-    butlers: dict[str, dict[str, str]]
+    butlers: list[str]
     schemas: dict[str, str]
     efd_url: str | None
 
@@ -186,8 +186,11 @@ def main():
     # Load the Butler (if one is available)
     logger.info("Connecting to Butlers")
     butlers = {}
-    for repo_name, repo in config.butlers.items():
-        butlers[repo_name] = Butler(repo)
+    for repo in config.butlers:
+        try:
+            butlers[repo] = Butler(repo)
+        except Exception as e:
+            logger.error(f"Failed to connect to butler {repo}: {e}")
 
     # Load the EFD client (if one is available)
     efd_client: EfdClient | None = None
