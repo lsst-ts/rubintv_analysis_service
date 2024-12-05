@@ -228,7 +228,7 @@ class JoinBuilder:
         return select_from
 
 
-def _removeSchemaTable(schema, table_name):
+def _remove_schema_table(schema, table_name):
     """Remove a table from the schema
 
     We do this because the ConsDbSchema contains the tables and columns
@@ -293,7 +293,7 @@ class ConsDbSchema:
                 # A new table was added to the schema and cannot be parsed
                 msg = f"Table {table['name']} has not been implemented in the RubinTV analysis service"
                 logger.warning(msg)
-                _removeSchemaTable(self.schema, table["name"])
+                _remove_schema_table(self.schema, table["name"])
             else:
                 try:
                     self.tables[table["name"]] = sqlalchemy.Table(
@@ -306,7 +306,7 @@ class ConsDbSchema:
                     # The table is in sdm_schemas but has not yet been added
                     # to the database.
                     logger.warning(f"Table {table['name']} from schema not found in database")
-                    _removeSchemaTable(self.schema, table["name"])
+                    _remove_schema_table(self.schema, table["name"])
 
         self.joins = JoinBuilder(self.tables, join_templates)
 
