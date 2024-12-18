@@ -268,5 +268,6 @@ def build_query(
 
 # Register the commands
 LoadColumnsCommand.register("load columns")
+CountRowsCommand.register("count rows")
 CalculateBoundsCommand.register("get bounds")
 LoadInstrumentCommand.register("load instrument")
