@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 
 from ..command import BaseCommand
 from ..database import exposure_tables, visit1_tables
-from ..query import EqualityQuery, ParentQuery, Query
+from ..query import EqualityQuery, ParentQuery, Query, AggregateQuery
 
 if TYPE_CHECKING:
     from ..data import DataCenter
@@ -193,29 +193,33 @@ class CountRowsCommand(BaseCommand):
     data_ids: list[tuple[int, int]] | None = None
     response_type: str = "row counts"
 
-    def build_contents(self, data_center: DataCenter) -> dict[str, int]:
+    def build_contents(self, data_center: DataCenter) -> dict:
         """Query the database to count rows in each specified table."""
         database = data_center.schemas[self.database]
-
-        # Construct the base query
-        base_query = build_query([], self.query, self.global_query, self.day_obs)
 
         # Initialize a dictionary to store row counts
         counts = {}
 
         for table in self.tables:
-            # Define columns as empty because we're counting rows, not selecting specific columns
-            columns = [f"{table}.*"]
-
-            # Build the query for the current table
-            count_query = database.query(
-                columns=columns,  # Pass the table name explicitly as part of columns
-                query=base_query,  # Apply filtering logic, if any
-                data_ids=self.data_ids,  # Include data_ids for additional filtering
+            # Construct an AggregateQuery for counting rows in the table
+            aggregate_query = AggregateQuery(
+                table=table,
+                aggregate="COUNT",  # Specify the aggregation function
             )
 
-            # Use the length of one column's result to determine the row count
-            counts[table] = len(count_query[next(iter(count_query))]) if count_query else 0
+            # Execute the query using the database object
+            query_result = database.query(
+                columns=[],  # No specific columns needed for row count
+                query=aggregate_query,  # Use the AggregateQuery for row counting
+                data_ids=self.data_ids,  # Optional data_ids for filtering
+            )
+
+            # Extract the row count from the query result
+            # query_result is expected to be a dictionary with at least one column as a key
+            if query_result:
+                counts[table] = query_result[next(iter(query_result))][0]
+            else:
+                counts[table] = 0
 
         content = {
             "schema": self.database,
