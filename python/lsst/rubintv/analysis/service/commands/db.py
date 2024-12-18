@@ -84,70 +84,13 @@ class LoadColumnsCommand(BaseCommand):
         data = database.query(self.columns, query, self.data_ids)
 
         if not data:
+            # there is no data to return
             data = []
         content = {
             "schema": self.database,
             "columns": self.columns,
             "data": data,
         }
-        return content
-
-
-@dataclass(kw_only=True)
-class CountRowsCommand(BaseCommand):
-    """Count rows in table columns.
-
-    Attributes
-    ----------
-
-    Same as `LoadColumnsCommand`
-    """
-
-    database: str
-    columns: list[str]
-    query: dict | None = None
-    global_query: dict | None = None
-    day_obs: str | None = None
-    data_ids: list[tuple[int, int]] | None = None
-    response_type: str = "row count"
-
-    def build_contents(self, data_center: DataCenter) -> dict:
-        """Query the database to count rows for each specified column."""
-        database = data_center.schemas[self.database]
-
-        # Use the shared build_query function
-        base_query = build_query(self.columns, self.query, self.global_query, self.day_obs)
-
-        counts = {}
-
-        for column in self.columns:
-            table_name, column_name = column.split(".")
-
-            # Define an aggregation query for COUNT
-            count_query = Query.from_dict(
-                {
-                    "aggregate": "COUNT",
-                    "column": column_name,
-                }
-            )
-
-            # Combine with the base query if present
-            if base_query:
-                combined_query = ParentQuery(
-                    children=[count_query, base_query],
-                    operator="AND",
-                )
-            else:
-                combined_query = count_query
-
-            count_result = database.query([f"COUNT({column_name})"], combined_query, self.data_ids)
-            counts[column] = count_result[0][0] if count_result else 0
-
-        content = {
-            "schema": self.database,
-            "row_count": counts,
-        }
-        logging.info("Returning for counts", content=content)
         return content
 
 
@@ -238,6 +181,43 @@ class LoadInstrumentCommand(BaseCommand):
         return result
 
 
+@dataclass(kw_only=True)
+class CountRowsCommand(BaseCommand):
+    """Count the number of rows in a database table."""
+
+    database: str
+    tables: list[str]
+    query: dict | None = None
+    global_query: dict | None = None
+    day_obs: str | None = None
+    response_type: str = "row counts"
+
+    def build_contents(self, data_center: DataCenter) -> dict:
+        """Query the database to count rows in each specified table."""
+        database = data_center.schemas[self.database]
+
+        # Construct the base query
+        base_query = build_query([], self.query, self.global_query, self.day_obs)
+
+        # Initialize a dictionary to store row counts
+        counts = {}
+
+        for table in self.tables:
+            # Build a COUNT query for the table
+            count_query = database.query(
+                [f"COUNT(*) AS row_count"],
+                table,
+                base_query,
+            )
+            counts[table] = count_query[0]["row_count"] if count_query else 0
+
+        # Return the counts in the expected format
+        return {
+            "schema": self.database,
+            "table_counts": counts,
+        }
+
+
 def build_query(
     columns: list[str],
     query: dict | None = None,
@@ -288,6 +268,5 @@ def build_query(
 
 # Register the commands
 LoadColumnsCommand.register("load columns")
-CountRowsCommand.register("count rows")
 CalculateBoundsCommand.register("get bounds")
 LoadInstrumentCommand.register("load instrument")
