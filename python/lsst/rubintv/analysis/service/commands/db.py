@@ -190,9 +190,10 @@ class CountRowsCommand(BaseCommand):
     query: dict | None = None
     global_query: dict | None = None
     day_obs: str | None = None
+    data_ids: list[tuple[int, int]] | None = None
     response_type: str = "row counts"
 
-    def build_contents(self, data_center: DataCenter) -> dict:
+    def build_contents(self, data_center: DataCenter) -> dict[str, int]:
         """Query the database to count rows in each specified table."""
         database = data_center.schemas[self.database]
 
@@ -203,15 +204,24 @@ class CountRowsCommand(BaseCommand):
         counts = {}
 
         for table in self.tables:
-            # Build a COUNT query for the table
-            count_query = database.query(
-                [f"COUNT(*) AS row_count"],
-                table,
-                base_query,
-            )
-            counts[table] = count_query[0]["row_count"] if count_query else 0
+            # Define columns as empty because we're counting rows, not selecting specific columns
+            columns = [f"{table}.*"]
 
-        # Return the counts in the expected format
+            # Build the query for the current table
+            count_query = database.query(
+                columns=columns,  # Pass the table name explicitly as part of columns
+                query=base_query,  # Apply filtering logic, if any
+                data_ids=self.data_ids,  # Include data_ids for additional filtering
+            )
+
+            # Use the length of one column's result to determine the row count
+            counts[table] = len(count_query[next(iter(count_query))]) if count_query else 0
+
+        content = {
+            "schema": self.database,
+            "table_counts": counts,
+        }
+        logging.info("Row counts are:", content=content)
         return {
             "schema": self.database,
             "table_counts": counts,
