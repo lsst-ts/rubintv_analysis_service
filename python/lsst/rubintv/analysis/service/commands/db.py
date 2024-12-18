@@ -212,6 +212,7 @@ class CountRowsCommand(BaseCommand):
             )
 
             # Execute the query using the database object
+            logging.info("In build contents loop:", column=column, ag_query=aggregate_query)
             query_result = database.query(
                 columns=[column],  # Use the specific column for counting
                 query=aggregate_query,  # Use the AggregateQuery for row counting
