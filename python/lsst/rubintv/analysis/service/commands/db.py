@@ -186,7 +186,7 @@ class CountRowsCommand(BaseCommand):
     """Count the number of rows in a database table."""
 
     database: str
-    tables: list[str]
+    columns: list[str]
     query: dict | None = None
     global_query: dict | None = None
     day_obs: str | None = None
@@ -200,16 +200,20 @@ class CountRowsCommand(BaseCommand):
         # Initialize a dictionary to store row counts
         counts = {}
 
-        for table in self.tables:
-            # Construct an AggregateQuery for counting rows in the table
+        for column in self.columns:
+            # Split the column into table and column name parts
+            table, column_name = column.split(".")
+
+            # Construct an AggregateQuery for counting non-NULL rows in the specified column
             aggregate_query = AggregateQuery(
                 table=table,
                 aggregate="COUNT",  # Specify the aggregation function
+                column=column_name,  # Pass the column name for counting
             )
 
             # Execute the query using the database object
             query_result = database.query(
-                columns=[],  # No specific columns needed for row count
+                columns=[column],  # Use the specific column for counting
                 query=aggregate_query,  # Use the AggregateQuery for row counting
                 data_ids=self.data_ids,  # Optional data_ids for filtering
             )
@@ -217,9 +221,9 @@ class CountRowsCommand(BaseCommand):
             # Extract the row count from the query result
             # query_result is expected to be a dictionary with at least one column as a key
             if query_result:
-                counts[table] = query_result[next(iter(query_result))][0]
+                counts[column] = query_result[next(iter(query_result))][0]
             else:
-                counts[table] = 0
+                counts[column] = 0
 
         content = {
             "schema": self.database,
