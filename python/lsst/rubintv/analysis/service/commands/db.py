@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 
 from ..command import BaseCommand
 from ..database import exposure_tables, visit1_tables
-from ..query import EqualityQuery, ParentQuery, Query, AggregateQuery
+from ..query import AggregateQuery, EqualityQuery, ParentQuery, Query
 
 if TYPE_CHECKING:
     from ..data import DataCenter
