@@ -202,41 +202,30 @@ class CountRowsCommand(BaseCommand):
 
         for column in self.columns:
             # Split the column into table and column name parts
-            table, column_name = column.split(".")
+            table_name, column_name = column.split(".")
 
-            # Construct an AggregateQuery for counting non-NULL rows in the specified column
+            # Get the SQLAlchemy Table object for the table
+            table = database.get_table(table_name)
+
+            # Construct an AggregateQuery for counting non-NULL rows
             aggregate_query = AggregateQuery(
-                table=database.get_table(table),  # Use the SQLAlchemy Table object
-                aggregate="COUNT",  # Specify the aggregation function
-                column=column_name,  # Pass the column name for counting
+                table=table,
+                aggregate="COUNT",
+                column=column_name,
             )
 
-            # Execute the query using the database object
-            query_result = database.query(
-                columns=[column],  # Use the specific column for counting
-                query=aggregate_query,  # Use the AggregateQuery for row counting
-                data_ids=self.data_ids,  # Optional data_ids for filtering
-            )
+            # Execute the AggregateQuery directly to get the count
+            query_result = aggregate_query(database)
 
             # Extract the row count from the query result
-            # query_result is expected to be a dictionary with column names as keys and counts as values
-            if query_result and column in query_result:
-                counts[column] = query_result[column]
-            else:
-                counts[column] = 0
+            counts[column] = query_result.result["count"]
 
-            # Return the counts in the expected format
-            content = {
-                "schema": self.database,
-                "table_counts": counts,
-            }
-
-            logger.info("Row counts are:", content=content)
-
-            return {
-                "schema": self.database,
-                "table_counts": counts,
-            }
+        logger.info(f"Counts are: {counts}")
+        # Return the counts in the expected format
+        return {
+            "schema": self.database,
+            "table_counts": counts,
+        }
 
 
 def build_query(

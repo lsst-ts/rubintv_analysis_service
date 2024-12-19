@@ -267,10 +267,14 @@ class AggregateQuery(Query):
         column = self.table.columns[self.column]
 
         # Build the SQLAlchemy count query
-        query = sqlalchemy.func.count(column).label(f"count_{self.column}")
+        query = sqlalchemy.select(sqlalchemy.func.count(column).label("count")).select_from(self.table)
 
-        # Return the SQLAlchemy query (not executed here)
-        return QueryResult(query, {self.table.name})
+        # Execute the query and fetch the count
+        result = database.fetch_data(query)
+        count_value = result[0]["count"] if result else 0
+
+        # Return the result as a QueryResult
+        return QueryResult({"count": count_value}, {self.table.name})
 
     @staticmethod
     def from_dict(query_dict: dict[str, Any]) -> AggregateQuery:
