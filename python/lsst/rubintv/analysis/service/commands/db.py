@@ -202,7 +202,8 @@ class CountRowsCommand(BaseCommand):
 
         for column in self.columns:
             # Split the column into table and column name parts
-            table, column_name = column.split(".")
+            table_name, column_name = column.split(".")
+            table = database.get_table(table_name)
 
             # Construct an AggregateQuery for counting non-NULL rows in the specified column
             aggregate_query = AggregateQuery(

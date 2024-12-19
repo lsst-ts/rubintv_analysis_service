@@ -352,6 +352,21 @@ class ConsDbSchema:
         index_columns = _table["index_columns"]
         return DatabaseSelectionId(data_id=self.get_data_id(table), columns=index_columns)
 
+    def get_table(self, table: str) -> sa.Table:
+        """Return the table model for a table.
+
+        Parameters
+        ----------
+        table :
+            The name of the table in the database.
+
+        Returns
+        -------
+        result :
+            The table model for the table.
+        """
+        return self.tables[table]
+
     def get_column(self, column: str) -> sa.Column:
         """Return the column model for a column.
 
@@ -472,7 +487,7 @@ class ConsDbSchema:
         select_from = self.joins.build_join(table_names)
 
         # Build the query
-        query_model = sa.select(*table_columns).select_from(sa.text(select_from)).where(query_model)
+        query_model = sa.select(*table_columns).select_from(select_from).where(query_model)
 
         # Fetch the data
         result = self.fetch_data(query_model)
