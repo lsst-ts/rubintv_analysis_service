@@ -242,3 +242,42 @@ class ParentQuery(Query):
             children=[Query.from_dict(child) for child in query_dict["children"]],
             operator=query_dict["operator"],
         )
+
+
+class AggregateQuery(Query):
+    """A query for performing aggregate functions like COUNT.
+
+    Parameters
+    ----------
+    table :
+        The SQLAlchemy Table object to perform the aggregation on.
+    aggregate :
+        The aggregate function (e.g., "COUNT").
+    column :
+        The column name as a string.
+    """
+
+    def __init__(self, table: sqlalchemy.Table, aggregate: str, column: str):
+        self.table = table
+        self.aggregate = aggregate
+        self.column = column
+
+    def __call__(self, database: ConsDbSchema) -> QueryResult:
+        # Fetch the column object from the table
+        column = self.table.columns[self.column]
+
+        # Build the SQLAlchemy count query
+        query = sqlalchemy.select(sqlalchemy.func.count(column).label("count")).select_from(self.table)
+
+        # Execute the query and fetch the count
+        result = database.fetch_data(query)
+        count_value = result["count"] if result else 0
+
+        # Return the result as a QueryResult
+        return QueryResult({"count": count_value}, {self.table.name})
+
+    @staticmethod
+    def from_dict(query_dict: dict[str, Any]) -> AggregateQuery:
+        return AggregateQuery(
+            table=query_dict["table"], aggregate=query_dict["aggregate"], column=query_dict.get("column")
+        )

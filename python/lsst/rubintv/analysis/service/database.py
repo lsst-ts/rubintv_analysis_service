@@ -352,6 +352,21 @@ class ConsDbSchema:
         index_columns = _table["index_columns"]
         return DatabaseSelectionId(data_id=self.get_data_id(table), columns=index_columns)
 
+    def get_table(self, table: str) -> sqlalchemy.Table:
+        """Return the table model for a table.
+
+        Parameters
+        ----------
+        table :
+            The name of the table in the database.
+
+        Returns
+        -------
+        result :
+            The table model for the table.
+        """
+        return self.tables[table]
+
     def get_column(self, column: str) -> sqlalchemy.Column:
         """Return the column model for a column.
 

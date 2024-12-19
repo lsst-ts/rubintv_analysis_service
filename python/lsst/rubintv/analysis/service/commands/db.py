@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 
 from ..command import BaseCommand
 from ..database import exposure_tables, visit1_tables
-from ..query import EqualityQuery, ParentQuery, Query
+from ..query import EqualityQuery, ParentQuery, Query, AggregateQuery
 
 if TYPE_CHECKING:
     from ..data import DataCenter
@@ -121,7 +121,6 @@ class LoadColumnsCommand(BaseCommand):
             "columns": self.columns,
             "data": data,
         }
-
         return content
 
 
@@ -212,7 +211,53 @@ class LoadInstrumentCommand(BaseCommand):
         return result
 
 
+@dataclass(kw_only=True)
+class CountRowsCommand(BaseCommand):
+    """Count the number of rows in a database table."""
+
+    database: str
+    columns: list[str]
+    query: dict | None = None
+    global_query: dict | None = None
+    day_obs: str | None = None
+    data_ids: list[tuple[int, int]] | None = None
+    response_type: str = "row counts"
+
+    def build_contents(self, data_center: DataCenter) -> dict:
+        """Query the database to count rows in each specified table."""
+        database = data_center.schemas[self.database]
+
+        # Initialize a dictionary to store row counts
+        counts = {}
+
+        for column in self.columns:
+            # Split the column into table and column name parts
+            table_name, column_name = column.split(".")
+
+            # Get the SQLAlchemy Table object for the table
+            table = database.get_table(table_name)
+
+            # Construct an AggregateQuery for counting non-NULL rows
+            aggregate_query = AggregateQuery(
+                table=table,
+                aggregate="COUNT",
+                column=column_name,
+            )
+
+            # Execute the AggregateQuery directly to get the count
+            query_result = aggregate_query(database)
+
+            # Extract the row count from the query result
+            counts[column] = query_result.result["count"]
+
+        return {
+            "schema": self.database,
+            "table_counts": counts,
+        }
+
+
 # Register the commands
 LoadColumnsCommand.register("load columns")
+CountRowsCommand.register("count rows")
 CalculateBoundsCommand.register("get bounds")
 LoadInstrumentCommand.register("load instrument")
