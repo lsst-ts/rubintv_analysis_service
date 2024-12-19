@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from ..data import DataCenter
 
 
-logger = logging.getLogger("lsst.rubintv.analysis.service.worker")
+logger = logging.getLogger("lsst.rubintv.analysis.service.commands.db")
 
 
 @dataclass(kw_only=True)
@@ -250,8 +250,6 @@ class CountRowsCommand(BaseCommand):
             # Extract the row count from the query result
             counts[column] = query_result.result["count"]
 
-        logger.info(f"Counts are: {counts}")
-        # Return the counts in the expected format
         return {
             "schema": self.database,
             "table_counts": counts,
