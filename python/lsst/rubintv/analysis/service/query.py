@@ -250,34 +250,30 @@ class AggregateQuery(Query):
     Parameters
     ----------
     table :
-        The table to perform the aggregation on.
+        The SQLAlchemy Table object to perform the aggregation on.
     aggregate :
-        The aggregate function (e.g., "COUNT", "SUM").
+        The aggregate function (e.g., "COUNT").
     column :
-        The column to aggregate. If None, applies the aggregation to all rows (e.g., COUNT(*)).
+        The column name as a string.
     """
 
-    def __init__(self, table: str, aggregate: str, column: str | None = None):
+    def __init__(self, table: sqlalchemy.Table, aggregate: str, column: str):
         self.table = table
         self.aggregate = aggregate
         self.column = column
 
     def __call__(self, database: ConsDbSchema) -> QueryResult:
-        if self.column:
-            # Aggregate a specific column
-            column = database.get_column(f"{self.table}.{self.column}")
-            result = database.fetch_data(
-                sqlalchemy.select(sqlalchemy.func.count(column)).select_from(self.table)
-            )
-        else:
-            # Aggregate all rows (COUNT(*))
-            result = database.fetch_data(sqlalchemy.select(sqlalchemy.func.count()).select_from(self.table))
-        return QueryResult(result, {self.table})
+        # Fetch the column object from the table
+        column = self.table.columns[self.column]
+
+        # Build the SQLAlchemy count query
+        query = sqlalchemy.func.count(column).label(f"count_{self.column}")
+
+        # Return the SQLAlchemy query (not executed here)
+        return QueryResult(query, {self.table.name})
 
     @staticmethod
     def from_dict(query_dict: dict[str, Any]) -> AggregateQuery:
         return AggregateQuery(
-            table=query_dict["table"],
-            aggregate=query_dict["aggregate"],
-            column=query_dict.get("column"),  # Optional
+            table=query_dict["table"], aggregate=query_dict["aggregate"], column=query_dict.get("column")
         )
