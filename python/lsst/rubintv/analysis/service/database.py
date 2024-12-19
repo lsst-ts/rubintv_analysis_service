@@ -23,12 +23,12 @@ from __future__ import annotations
 
 import logging
 
-import sqlalchemy as sa
+import sqlalchemy
 
 from .data import DatabaseSelectionId, DataId
 from .query import Query
 
-logger = logging.getLogger("lsst.rubintv.analysis.service.worker")
+logger = logging.getLogger("lsst.rubintv.analysis.service.database")
 
 
 # Exposure tables currently in the schema
@@ -95,7 +95,7 @@ class JoinError(Exception):
 
 
 class JoinBuilder:
-    """Builds joins between tables in sa.
+    """Builds joins between tables in sqlalchemy.
 
     Using a dictionary of joins, usually from the joins.yaml file,
     this class builds a graph of joins between tables so that given a
@@ -112,7 +112,7 @@ class JoinBuilder:
         and a list of columns to join on as values.
     """
 
-    def __init__(self, tables: dict[str, sa.Table], joins: list[dict]):
+    def __init__(self, tables: dict[str, sqlalchemy.Table], joins: list[dict]):
         self.tables = tables
         self.joins = joins
         self.join_graph = self._build_join_graph()
@@ -167,7 +167,7 @@ class JoinBuilder:
                         queue.append((neighbor, path + [neighbor]))
         raise JoinError(f"No path found between {start} and {end}")
 
-    def build_join(self, table_names: set[str]) -> sa.Table | sa.Join:
+    def build_join(self, table_names: set[str]) -> sqlalchemy.Table | sqlalchemy.Join:
         """Build a join between all of the tables in a SQL statement.
 
         Parameters
@@ -222,7 +222,7 @@ class JoinBuilder:
                     raise ValueError(f"No valid join conditions found between {t1} and {t2}")
 
                 # Implement the join in sqlalchemy
-                select_from = sa.join(select_from, self.tables[t2], *join_conditions)
+                select_from = sqlalchemy.join(select_from, self.tables[t2], *join_conditions)
                 joined_tables.add(t2)
 
         return select_from
@@ -271,16 +271,16 @@ class ConsDbSchema:
         A JoinBuilder object that builds joins between tables.
     """
 
-    engine: sa.engine.Engine
+    engine: sqlalchemy.engine.Engine
     schema: dict
-    metadata: sa.MetaData
-    tables: dict[str, sa.Table]
+    metadata: sqlalchemy.MetaData
+    tables: dict[str, sqlalchemy.Table]
     joins: JoinBuilder
 
-    def __init__(self, engine: sa.engine.Engine, schema: dict, join_templates: list):
+    def __init__(self, engine: sqlalchemy.engine.Engine, schema: dict, join_templates: list):
         self.engine = engine
         self.schema = schema
-        self.metadata = sa.MetaData()
+        self.metadata = sqlalchemy.MetaData()
 
         self.tables = {}
         schema_tables = self.schema["tables"].copy()
@@ -296,13 +296,13 @@ class ConsDbSchema:
                 _remove_schema_table(self.schema, table["name"])
             else:
                 try:
-                    self.tables[table["name"]] = sa.Table(
+                    self.tables[table["name"]] = sqlalchemy.Table(
                         table["name"],
                         self.metadata,
                         autoload_with=self.engine,
                         schema=schema["name"],
                     )
-                except sa.exc.NoSuchTableError:
+                except sqlalchemy.exc.NoSuchTableError:
                     # The table is in sdm_schemas but has not yet been added
                     # to the database.
                     logger.warning(f"Table {table['name']} from schema not found in database")
@@ -352,22 +352,7 @@ class ConsDbSchema:
         index_columns = _table["index_columns"]
         return DatabaseSelectionId(data_id=self.get_data_id(table), columns=index_columns)
 
-    def get_table(self, table: str) -> sa.Table:
-        """Return the table model for a table.
-
-        Parameters
-        ----------
-        table :
-            The name of the table in the database.
-
-        Returns
-        -------
-        result :
-            The table model for the table.
-        """
-        return self.tables[table]
-
-    def get_column(self, column: str) -> sa.Column:
+    def get_column(self, column: str) -> sqlalchemy.Column:
         """Return the column model for a column.
 
         Parameters
@@ -383,7 +368,7 @@ class ConsDbSchema:
         table, column = column.split(".")
         return self.tables[table].columns[column]
 
-    def fetch_data(self, query_model: sa.Select) -> dict[str, list]:
+    def fetch_data(self, query_model: sqlalchemy.Select) -> dict[str, list]:
         """Load data from the database.
 
         Parameters
@@ -400,7 +385,9 @@ class ConsDbSchema:
         # Convert the unnamed row data into columns
         return {str(col): [row[i] for row in data] for i, col in enumerate(result.keys())}
 
-    def get_column_models(self, columns: list[str]) -> tuple[set[sa.Column], set[str], list[sa.Column]]:
+    def get_column_models(
+        self, columns: list[str]
+    ) -> tuple[set[sqlalchemy.Column], set[str], list[sqlalchemy.Column]]:
         """Return the sqlalchemy models for a list of columns.
 
         Parameters
@@ -424,7 +411,7 @@ class ConsDbSchema:
             table_columns.add(column_obj.label(f"{table_name}.{column_name}"))
 
         # Add the data Ids (seq_num and day_obs) to the query.
-        def add_data_ids(table_name: str) -> list[sa.Column]:
+        def add_data_ids(table_name: str) -> list[sqlalchemy.Column]:
             day_obs_column = self.get_column(f"{table_name}.day_obs")
             seq_num_column = self.get_column(f"{table_name}.seq_num")
             # Strip off the table name to make the data IDs uniform
@@ -467,7 +454,6 @@ class ConsDbSchema:
         result :
             A dictionary of columns as keys and lists of values as values.
         """
-        logger.info(f"Column names: {columns}")
         # Get the models for the columns
         table_columns, table_names, data_id_columns = self.get_column_models(columns)
         day_obs_column, seq_num_column = data_id_columns
@@ -475,20 +461,20 @@ class ConsDbSchema:
         logger.info(f"table names: {table_names}")
 
         # generate the query
-        query_model = sa.and_(*[col.isnot(None) for col in table_columns])
+        query_model = sqlalchemy.and_(*[col.isnot(None) for col in table_columns])
         if query is not None:
             query_result = query(self)
-            query_model = sa.and_(query_model, query_result.result)
+            query_model = sqlalchemy.and_(query_model, query_result.result)
             table_names.update(query_result.tables)
         if data_ids is not None:
-            data_id_select = sa.tuple_(day_obs_column, seq_num_column).in_(data_ids)
-            query_model = sa.and_(query_model, data_id_select)
+            data_id_select = sqlalchemy.tuple_(day_obs_column, seq_num_column).in_(data_ids)
+            query_model = sqlalchemy.and_(query_model, data_id_select)
 
         # Build the join
         select_from = self.joins.build_join(table_names)
 
         # Build the query
-        query_model = sa.select(*table_columns).select_from(select_from).where(query_model)
+        query_model = sqlalchemy.select(*table_columns).select_from(select_from).where(query_model)
 
         # Fetch the data
         result = self.fetch_data(query_model)
@@ -509,11 +495,11 @@ class ConsDbSchema:
             The ``(min, max)`` of the chosen column.
         """
         table, column = column.split(".")
-        _table = sa.Table(table, self.metadata, autoload_with=self.engine)
+        _table = sqlalchemy.Table(table, self.metadata, autoload_with=self.engine)
         _column = _table.columns[column]
 
         with self.engine.connect() as connection:
-            query = sa.select((sa.func.min(_column)))
+            query = sqlalchemy.select((sqlalchemy.func.min(_column)))
             result = connection.execute(query)
             col_min = result.fetchone()
             if col_min is not None:
@@ -521,7 +507,7 @@ class ConsDbSchema:
             else:
                 raise ValueError(f"Could not calculate the min of column {column}")
 
-            query = sa.select((sa.func.max(_column)))
+            query = sqlalchemy.select((sqlalchemy.func.max(_column)))
             result = connection.execute(query)
             col_max = result.fetchone()
             if col_max is not None:

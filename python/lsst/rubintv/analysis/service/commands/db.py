@@ -75,16 +75,46 @@ class LoadColumnsCommand(BaseCommand):
     response_type: str = "table columns"
 
     def build_contents(self, data_center: DataCenter) -> dict:
-        """Query the database to return the requested columns."""
+        # Query the database to return the requested columns
         database = data_center.schemas[self.database]
 
-        # Use the shared build_query function
-        query = build_query(self.columns, self.query, self.global_query, self.day_obs)
+        query: Query | None = None
+        if self.query is not None:
+            query = Query.from_dict(self.query)
+        if self.global_query is not None:
+            global_query = Query.from_dict(self.global_query)
+            if query is None:
+                query = global_query
+            else:
+                query = ParentQuery(
+                    children=[query, global_query],
+                    operator="AND",
+                )
+        if self.day_obs is not None:
+            table_name = self.columns[0].split(".")[0]
+            if table_name in exposure_tables:
+                column = "exposure.day_obs"
+            elif table_name in visit1_tables:
+                column = "visit1.day_obs"
+            else:
+                raise ValueError(f"Unsupported table name: {table_name}")
+            day_obs_query = EqualityQuery(
+                column=column,
+                value=int(self.day_obs.replace("-", "")),
+                operator="eq",
+            )
+            if query is None:
+                query = day_obs_query
+            else:
+                query = ParentQuery(
+                    children=[query, day_obs_query],
+                    operator="AND",
+                )
 
         data = database.query(self.columns, query, self.data_ids)
 
         if not data:
-            # there is no data to return
+            # There is no data to return
             data = []
         content = {
             "schema": self.database,
@@ -226,54 +256,6 @@ class CountRowsCommand(BaseCommand):
             "schema": self.database,
             "table_counts": counts,
         }
-
-
-def build_query(
-    columns: list[str],
-    query: dict | None = None,
-    global_query: dict | None = None,
-    day_obs: str | None = None,
-) -> Query | None:
-    """Construct a query based on input parameters."""
-    constructed_query: Query | None = None
-
-    if query is not None:
-        constructed_query = Query.from_dict(query)
-
-    if global_query is not None:
-        global_query_obj = Query.from_dict(global_query)
-        if constructed_query is None:
-            constructed_query = global_query_obj
-        else:
-            constructed_query = ParentQuery(
-                children=[constructed_query, global_query_obj],
-                operator="AND",
-            )
-
-    if day_obs is not None:
-        table_name = columns[0].split(".")[0]
-        if table_name in exposure_tables:
-            column = "exposure.day_obs"
-        elif table_name in visit1_tables:
-            column = "visit1.day_obs"
-        else:
-            raise ValueError(f"Unsupported table name: {table_name}")
-
-        day_obs_query = EqualityQuery(
-            column=column,
-            value=int(day_obs.replace("-", "")),
-            operator="eq",
-        )
-
-        if constructed_query is None:
-            constructed_query = day_obs_query
-        else:
-            constructed_query = ParentQuery(
-                children=[constructed_query, day_obs_query],
-                operator="AND",
-            )
-
-    return constructed_query
 
 
 # Register the commands
