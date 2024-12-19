@@ -467,6 +467,7 @@ class ConsDbSchema:
         result :
             A dictionary of columns as keys and lists of values as values.
         """
+        logger.info(f"Column names: {columns}")
         # Get the models for the columns
         table_columns, table_names, data_id_columns = self.get_column_models(columns)
         day_obs_column, seq_num_column = data_id_columns
