@@ -271,7 +271,7 @@ class AggregateQuery(Query):
 
         # Execute the query and fetch the count
         result = database.fetch_data(query)
-        count_value = result[0]["count"] if result else 0
+        count_value = result["count"] if result else 0
 
         # Return the result as a QueryResult
         return QueryResult({"count": count_value}, {self.table.name})

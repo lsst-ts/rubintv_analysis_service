@@ -28,7 +28,7 @@ import sqlalchemy as sa
 from .data import DatabaseSelectionId, DataId
 from .query import Query
 
-logger = logging.getLogger("lsst.rubintv.analysis.service.database")
+logger = logging.getLogger("lsst.rubintv.analysis.service.worker")
 
 
 # Exposure tables currently in the schema
