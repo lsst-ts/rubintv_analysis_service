@@ -243,6 +243,8 @@ def main():
         "lsst.rubintv.analysis.service.worker",
         "lsst.rubintv.analysis.service.client",
         "lsst.rubintv.analysis.service.server",
+        "lsst.rubintv.analysis.service.database",
+        "lsst.rubintv.analysis.service.commands.db",
     ]:
         logger = logging.getLogger(logger_name)
         logger.setLevel(log_level)
