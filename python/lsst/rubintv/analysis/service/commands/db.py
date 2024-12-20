@@ -217,8 +217,22 @@ class AggregateQueryCommand(BaseCommand):
 
     Attributes
     ----------
-
-
+    database : str
+        The name of the database being queried.
+    columns : list[str]
+        A list of columns in the format "table.column" to apply the aggregate function to.
+    query_type : str
+        The type of aggregate query to perform (e.g., "COUNT", "SUM", "AVG").
+    query : dict | None
+        Additional filtering logic for the query.
+    global_query : dict | None
+        Workspace-level filtering logic to apply across all queries.
+    day_obs : str | None
+        Specific observation day to filter rows on.
+    data_ids : list[tuple[int, int]] | None
+        Specific (day_obs, seq_num) pairs to filter rows.
+    response_type : str
+        The type of response returned, defaulting to "aggregate".
     """
 
     database: str
@@ -231,25 +245,30 @@ class AggregateQueryCommand(BaseCommand):
     response_type: str = "aggregate"
 
     def build_contents(self, data_center: DataCenter) -> dict:
-        """Query the database to count rows in each specified table."""
+        """Query the database to perform the specified aggregate operation on each column."""
         database = data_center.schemas[self.database]
 
-        # Initialize a dictionary to store row counts
+        # Initialize a dictionary to store aggregate results
         result = {}
 
         for column in self.columns:
-            # Construct an AggregateQuery for counting non-NULL rows
+            # Construct an AggregateQuery for the specified operation
             aggregate_query = AggregateQuery(
-                aggregate=self.query_type,
-                column=column,
+                column=column,  # Full "table.column" format
+                aggregate=self.query_type,  # Specify the aggregation function
+                query=self.query,  # Additional filtering logic
+                global_query=self.global_query,  # Workspace-level filters
+                day_obs=self.day_obs,  # Observation day filter
+                data_ids=self.data_ids,  # Specific (day_obs, seq_num) pairs
             )
 
-            # Execute the AggregateQuery directly to get the count
+            # Execute the AggregateQuery directly to get the result
             query_result = aggregate_query(database)
 
-            # Extract the row count from the query result
-            result[column] = query_result.result[self.query_type]
+            # Extract the aggregate result from the query result
+            result[column] = query_result.result.get(self.query_type.lower(), 0)
 
+        # Return the results in the expected format
         return {
             "schema": self.database,
             self.response_type: result,

@@ -244,57 +244,83 @@ class ParentQuery(Query):
         )
 
 
-class AggregateQuery(Query):
-    """A query for performing aggregate functions like COUNT.
+class AggregateQuery:
+    """A query for performing aggregate functions like COUNT, SUM, AVG.
 
     Parameters
     ----------
-    table :
-        The SQLAlchemy Table object to perform the aggregation on.
-    column :
-        The column name as a string.
-    aggregate :
-        The aggregate function (e.g., "COUNT").
+    column : str
+        The column in the format "table.column" to apply the aggregation function.
+    aggregate : str
+        The aggregate function (e.g., "COUNT", "SUM", "AVG").
+    query : dict | None
+        Additional filtering logic for the query.
+    global_query : dict | None
+        Workspace-level filtering logic.
+    day_obs : str | None
+        Observation day to filter rows.
+    data_ids : list[tuple[int, int]] | None
+        Specific (day_obs, seq_num) pairs to filter rows.
     """
 
-    def __init__(self, column: str, aggregate: str):
-        self.column: str = column
-        self.aggregate: str = aggregate.upper()
+    def __init__(
+        self,
+        column: str,
+        aggregate: str,
+        query: dict | None = None,
+        global_query: dict | None = None,
+        day_obs: str | None = None,
+        data_ids: list[tuple[int, int]] | None = None,
+    ):
+        self.table_name, self.column_name = column.split(".")
+        self.aggregate = aggregate
+        self.query = query
+        self.global_query = global_query
+        self.day_obs = day_obs
+        self.data_ids = data_ids
 
     def __call__(self, database: ConsDbSchema) -> QueryResult:
-        # Split the column into table and column name parts
-        table_name, column_name = self.column.split(".")
+        # Get the SQLAlchemy Table object
+        table = database.get_table(self.table_name)
+        column = table.columns[self.column_name]
 
-        # Get the SQLAlchemy Table object for the table
-        table = database.get_table(table_name)
+        # Build the base aggregate query
+        aggregate_func = getattr(sqlalchemy.func, self.aggregate.lower())
+        base_query = sqlalchemy.select(aggregate_func(column).label(self.aggregate.lower())).select_from(
+            table
+        )
 
-        # Fetch the column object from the table
-        column = table.columns[column_name]
+        # Build filtering logic
+        filters = []
+        if self.query:
+            query_filters = Query.from_dict(self.query)(database).result
+            filters.append(query_filters)
 
-        sa_func = sqlalchemy.func
-        match self.aggregate:
-            case "COUNT":
-                agg_func = sa_func.count
-            case "MIN":
-                agg_func = sa_func.min
-            case "MAX":
-                agg_func = sa_func.max
-            case "SUM":
-                agg_func = sa_func.sum
-            case "AVG":
-                agg_func = sa_func.avg
-            case "_":
-                raise ValueError(f"{self.aggregate} is not an aggregate function.")
+        if self.global_query:
+            global_filters = Query.from_dict(self.global_query)(database).result
+            filters.append(global_filters)
 
-        label = self.aggregate.lower()
-        # Build the SQLAlchemy query
-        query = sqlalchemy.select(agg_func(column).label(label)).select_from(table)
+        if self.day_obs:
+            filters.append(table.columns["day_obs"] == int(self.day_obs.replace("-", "")))
 
-        result = database.fetch_data(query)
-        agg_value = result[label] if result else 0
+        if self.data_ids:
+            filters.append(
+                sqlalchemy.tuple_(
+                    table.columns["day_obs"],
+                    table.columns["seq_num"],
+                ).in_(self.data_ids)
+            )
+
+        # Apply filters if present
+        if filters:
+            base_query = base_query.where(sqlalchemy.and_(*filters))
+
+        # Execute the query and fetch the result
+        result = database.fetch_data(base_query)
+        aggregate_value = result[self.aggregate.lower()] if result else 0
 
         # Return the result as a QueryResult
-        return QueryResult({label: agg_value}, {table.name})
+        return QueryResult({self.aggregate.lower(): aggregate_value}, {self.table_name})
 
     @staticmethod
     def from_dict(query_dict: dict[str, Any]) -> AggregateQuery:
