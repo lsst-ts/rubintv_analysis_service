@@ -37,6 +37,59 @@ class TestCommand(utils.RasTestCase):
         return result["content"]
 
 
+class TestAggregateQueryCommand(TestCommand):
+    def test_count_rows(self):
+        columns = [
+            "exposure.ra",
+            "exposure.dec",
+        ]
+        command = {
+            "name": "aggregate query",
+            "parameters": {
+                "database": "testdb",
+                "columns": columns,
+                "query_type": "count",
+            },
+        }
+        content = self.execute_command(command, "aggregate")
+        data = content["aggregate"]
+        self.assertEqual(data, {columns[0]: [8], columns[1]: [8]})
+
+    def test_sum_rows(self):
+        columns = [
+            "exposure.ra",
+            "exposure.dec",
+        ]
+        command = {
+            "name": "aggregate query",
+            "parameters": {
+                "database": "testdb",
+                "columns": columns,
+                "query_type": "sum",
+            },
+        }
+        content = self.execute_command(command, "aggregate")
+        data = content["aggregate"]
+        self.assertEqual(data, {columns[0]: [440.0], columns[1]: [50.0]})
+
+    def test_max_rows(self):
+        columns = [
+            "exposure.ra",
+            "exposure.dec",
+        ]
+        command = {
+            "name": "aggregate query",
+            "parameters": {
+                "database": "testdb",
+                "columns": columns,
+                "query_type": "max",
+            },
+        }
+        content = self.execute_command(command, "aggregate")
+        data = content["aggregate"]
+        self.assertEqual(data, {columns[0]: [100.0], columns[1]: [50.0]})
+
+
 class TestCalculateBoundsCommand(TestCommand):
     def test_calculate_bounds_command(self):
         command = {

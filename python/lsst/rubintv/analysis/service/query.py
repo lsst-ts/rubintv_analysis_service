@@ -251,33 +251,53 @@ class AggregateQuery(Query):
     ----------
     table :
         The SQLAlchemy Table object to perform the aggregation on.
-    aggregate :
-        The aggregate function (e.g., "COUNT").
     column :
         The column name as a string.
+    aggregate :
+        The aggregate function (e.g., "COUNT").
     """
 
-    def __init__(self, table: sqlalchemy.Table, aggregate: str, column: str):
-        self.table = table
-        self.aggregate = aggregate
-        self.column = column
+    def __init__(self, column: str, aggregate: str):
+        self.column: str = column
+        self.aggregate: str = aggregate.upper()
 
     def __call__(self, database: ConsDbSchema) -> QueryResult:
+        # Split the column into table and column name parts
+        table_name, column_name = self.column.split(".")
+
+        # Get the SQLAlchemy Table object for the table
+        table = database.get_table(table_name)
+
         # Fetch the column object from the table
-        column = self.table.columns[self.column]
+        column = table.columns[column_name]
 
-        # Build the SQLAlchemy count query
-        query = sqlalchemy.select(sqlalchemy.func.count(column).label("count")).select_from(self.table)
+        sa_func = sqlalchemy.func
+        match self.aggregate:
+            case "COUNT":
+                agg_func = sa_func.count
+            case "MIN":
+                agg_func = sa_func.min
+            case "MAX":
+                agg_func = sa_func.max
+            case "SUM":
+                agg_func = sa_func.sum
+            case "AVG":
+                agg_func = sa_func.avg
+            case "_":
+                raise ValueError(f"{self.aggregate} is not an aggregate function.")
 
-        # Execute the query and fetch the count
+        label = self.aggregate.lower()
+        # Build the SQLAlchemy query
+        query = sqlalchemy.select(agg_func(column).label(label)).select_from(table)
+
         result = database.fetch_data(query)
-        count_value = result["count"] if result else 0
+        agg_value = result[label] if result else 0
 
         # Return the result as a QueryResult
-        return QueryResult({"count": count_value}, {self.table.name})
+        return QueryResult({label: agg_value}, {table.name})
 
     @staticmethod
     def from_dict(query_dict: dict[str, Any]) -> AggregateQuery:
         return AggregateQuery(
-            table=query_dict["table"], aggregate=query_dict["aggregate"], column=query_dict.get("column")
+            table=query_dict["table"], aggregate=query_dict["aggregate"], column=query_dict["column"]
         )

@@ -212,52 +212,52 @@ class LoadInstrumentCommand(BaseCommand):
 
 
 @dataclass(kw_only=True)
-class CountRowsCommand(BaseCommand):
-    """Count the number of rows in a database table."""
+class AggregateQueryCommand(BaseCommand):
+    """Perform the given aggregate query on database tables.
+
+    Attributes
+    ----------
+
+
+    """
 
     database: str
     columns: list[str]
+    query_type: str
     query: dict | None = None
     global_query: dict | None = None
     day_obs: str | None = None
     data_ids: list[tuple[int, int]] | None = None
-    response_type: str = "row counts"
+    response_type: str = "aggregate"
 
     def build_contents(self, data_center: DataCenter) -> dict:
         """Query the database to count rows in each specified table."""
         database = data_center.schemas[self.database]
 
         # Initialize a dictionary to store row counts
-        counts = {}
+        result = {}
 
         for column in self.columns:
-            # Split the column into table and column name parts
-            table_name, column_name = column.split(".")
-
-            # Get the SQLAlchemy Table object for the table
-            table = database.get_table(table_name)
-
             # Construct an AggregateQuery for counting non-NULL rows
             aggregate_query = AggregateQuery(
-                table=table,
-                aggregate="COUNT",
-                column=column_name,
+                aggregate=self.query_type,
+                column=column,
             )
 
             # Execute the AggregateQuery directly to get the count
             query_result = aggregate_query(database)
 
             # Extract the row count from the query result
-            counts[column] = query_result.result["count"]
+            result[column] = query_result.result[self.query_type]
 
         return {
             "schema": self.database,
-            "table_counts": counts,
+            self.response_type: result,
         }
 
 
 # Register the commands
 LoadColumnsCommand.register("load columns")
-CountRowsCommand.register("count rows")
+AggregateQueryCommand.register("aggregate query")
 CalculateBoundsCommand.register("get bounds")
 LoadInstrumentCommand.register("load instrument")
