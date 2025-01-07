@@ -51,8 +51,8 @@ class TestAggregateQueryCommand(TestCommand):
                 "query_type": "count",
             },
         }
-        content = self.execute_command(command, "aggregate")
-        data = content["aggregate"]
+        content = self.execute_command(command, "aggregated")
+        data = content["count"]
         self.assertEqual(data, {columns[0]: [8], columns[1]: [8]})
 
     def test_sum_rows(self):
@@ -68,8 +68,8 @@ class TestAggregateQueryCommand(TestCommand):
                 "query_type": "sum",
             },
         }
-        content = self.execute_command(command, "aggregate")
-        data = content["aggregate"]
+        content = self.execute_command(command, "aggregated")
+        data = content["sum"]
         self.assertEqual(data, {columns[0]: [440.0], columns[1]: [50.0]})
 
     def test_max_rows(self):
@@ -85,8 +85,8 @@ class TestAggregateQueryCommand(TestCommand):
                 "query_type": "max",
             },
         }
-        content = self.execute_command(command, "aggregate")
-        data = content["aggregate"]
+        content = self.execute_command(command, "aggregated")
+        data = content["max"]
         self.assertEqual(data, {columns[0]: [100.0], columns[1]: [50.0]})
 
 

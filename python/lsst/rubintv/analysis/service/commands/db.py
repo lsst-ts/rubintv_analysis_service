@@ -232,7 +232,7 @@ class AggregateQueryCommand(BaseCommand):
     data_ids : list[tuple[int, int]] | None
         Specific (day_obs, seq_num) pairs to filter rows.
     response_type : str
-        The type of response returned, defaulting to "aggregate".
+        The type of response returned, defaulting to "aggregated".
     """
 
     database: str
@@ -242,7 +242,7 @@ class AggregateQueryCommand(BaseCommand):
     global_query: dict | None = None
     day_obs: str | None = None
     data_ids: list[tuple[int, int]] | None = None
-    response_type: str = "aggregate"
+    response_type: str = "aggregated"
 
     def build_contents(self, data_center: DataCenter) -> dict:
         """Query the database to perform the specified aggregate operation on each column."""
@@ -268,10 +268,9 @@ class AggregateQueryCommand(BaseCommand):
             # Extract the aggregate result from the query result
             result[column] = query_result.result.get(self.query_type.lower(), 0)
 
-        # Return the results in the expected format
         return {
             "schema": self.database,
-            self.response_type: result,
+            self.query_type: result,
         }
 
 
