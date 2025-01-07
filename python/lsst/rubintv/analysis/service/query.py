@@ -250,7 +250,8 @@ class AggregateQuery:
     Parameters
     ----------
     column : str
-        The column in the format "table.column" to apply the aggregation function.
+        The column in the format "table.column" to apply the aggregation
+        function.
     aggregate : str
         The aggregate function (e.g., "COUNT", "SUM", "AVG").
     query : dict | None

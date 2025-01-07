@@ -220,7 +220,8 @@ class AggregateQueryCommand(BaseCommand):
     database : str
         The name of the database being queried.
     columns : list[str]
-        A list of columns in the format "table.column" to apply the aggregate function to.
+        A list of columns in the format "table.column" to apply the aggregate
+        function to.
     query_type : str
         The type of aggregate query to perform (e.g., "COUNT", "SUM", "AVG").
     query : dict | None
@@ -245,7 +246,8 @@ class AggregateQueryCommand(BaseCommand):
     response_type: str = "aggregated"
 
     def build_contents(self, data_center: DataCenter) -> dict:
-        """Query the database to perform the specified aggregate operation on each column."""
+        """Query the database to perform the specified aggregate operation on
+        each column."""
         database = data_center.schemas[self.database]
 
         # Initialize a dictionary to store aggregate results
