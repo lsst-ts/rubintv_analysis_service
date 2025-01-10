@@ -37,23 +37,23 @@ class TestCommand(utils.RasTestCase):
         return result["content"]
 
 
-class TestAggregateQueryCommand(TestCommand):
+class TestLoadColumnsWithAggregatorCommand(TestCommand):
     def test_count_rows(self):
         columns = [
             "exposure.ra",
             "exposure.dec",
         ]
         command = {
-            "name": "aggregate query",
+            "name": "load columns",
             "parameters": {
                 "database": "testdb",
                 "columns": columns,
-                "query_type": "count",
+                "aggregator": "count",
             },
         }
-        content = self.execute_command(command, "aggregated")
-        data = content["count"]
-        self.assertEqual(data, {columns[0]: [8], columns[1]: [8]})
+        content = self.execute_command(command, "table columns")
+        data = content["data"]
+        self.assertEqual(data, {columns[0]: 7, columns[1]: 7})
 
     def test_sum_rows(self):
         columns = [
@@ -61,16 +61,17 @@ class TestAggregateQueryCommand(TestCommand):
             "exposure.dec",
         ]
         command = {
-            "name": "aggregate query",
+            "name": "load columns",
             "parameters": {
                 "database": "testdb",
                 "columns": columns,
-                "query_type": "sum",
+                "aggregator": "sum",
             },
         }
-        content = self.execute_command(command, "aggregated")
-        data = content["sum"]
-        self.assertEqual(data, {columns[0]: [440.0], columns[1]: [50.0]})
+        content = self.execute_command(command, "table columns")
+        data = content["data"]
+        print(data)
+        self.assertEqual(data, {"exposure.ra": 370.0, "exposure.dec": 20.0})
 
     def test_max_rows(self):
         columns = [
@@ -78,16 +79,16 @@ class TestAggregateQueryCommand(TestCommand):
             "exposure.dec",
         ]
         command = {
-            "name": "aggregate query",
+            "name": "load columns",
             "parameters": {
                 "database": "testdb",
                 "columns": columns,
-                "query_type": "max",
+                "aggregator": "max",
             },
         }
-        content = self.execute_command(command, "aggregated")
-        data = content["max"]
-        self.assertEqual(data, {columns[0]: [100.0], columns[1]: [50.0]})
+        content = self.execute_command(command, "table columns")
+        data = content["data"]
+        self.assertEqual(data, {columns[0]: 100.0, columns[1]: 50.0})
 
 
 class TestCalculateBoundsCommand(TestCommand):
@@ -120,6 +121,7 @@ class TestLoadColumnsCommand(TestCommand):
 
         content = self.execute_command(command, "table columns")
         data = content["data"]
+        print(data)
 
         truth = cast(
             astropy.table.Table,

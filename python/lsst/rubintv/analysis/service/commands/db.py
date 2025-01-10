@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 
 from ..command import BaseCommand
 from ..database import exposure_tables, visit1_tables
-from ..query import AggregateQuery, EqualityQuery, ParentQuery, Query
+from ..query import EqualityQuery, ParentQuery, Query
 
 if TYPE_CHECKING:
     from ..data import DataCenter
@@ -72,6 +72,7 @@ class LoadColumnsCommand(BaseCommand):
     global_query: dict | None = None
     day_obs: str | None = None
     data_ids: list[tuple[int, int]] | None = None
+    aggregator: str | None = None
     response_type: str = "table columns"
 
     def build_contents(self, data_center: DataCenter) -> dict:
@@ -111,7 +112,7 @@ class LoadColumnsCommand(BaseCommand):
                     operator="AND",
                 )
 
-        data = database.query(self.columns, query, self.data_ids)
+        data = database.query(self.columns, query, self.data_ids, self.aggregator)
 
         if not data:
             # There is no data to return
@@ -211,73 +212,7 @@ class LoadInstrumentCommand(BaseCommand):
         return result
 
 
-@dataclass(kw_only=True)
-class AggregateQueryCommand(BaseCommand):
-    """Perform the given aggregate query on database tables.
-
-    Attributes
-    ----------
-    database : str
-        The name of the database being queried.
-    columns : list[str]
-        A list of columns in the format "table.column" to apply the aggregate
-        function to.
-    query_type : str
-        The type of aggregate query to perform (e.g., "COUNT", "SUM", "AVG").
-    query : dict | None
-        Additional filtering logic for the query.
-    global_query : dict | None
-        Workspace-level filtering logic to apply across all queries.
-    day_obs : str | None
-        Specific observation day to filter rows on.
-    data_ids : list[tuple[int, int]] | None
-        Specific (day_obs, seq_num) pairs to filter rows.
-    response_type : str
-        The type of response returned, defaulting to "aggregated".
-    """
-
-    database: str
-    columns: list[str]
-    query_type: str
-    query: dict | None = None
-    global_query: dict | None = None
-    day_obs: str | None = None
-    data_ids: list[tuple[int, int]] | None = None
-    response_type: str = "aggregated"
-
-    def build_contents(self, data_center: DataCenter) -> dict:
-        """Query the database to perform the specified aggregate operation on
-        each column."""
-        database = data_center.schemas[self.database]
-
-        # Initialize a dictionary to store aggregate results
-        result = {}
-
-        for column in self.columns:
-            # Construct an AggregateQuery for the specified operation
-            aggregate_query = AggregateQuery(
-                column=column,  # Full "table.column" format
-                aggregate=self.query_type,  # Specify the aggregation function
-                query=self.query,  # Additional filtering logic
-                global_query=self.global_query,  # Workspace-level filters
-                day_obs=self.day_obs,  # Observation day filter
-                data_ids=self.data_ids,  # Specific (day_obs, seq_num) pairs
-            )
-
-            # Execute the AggregateQuery directly to get the result
-            query_result = aggregate_query(database)
-
-            # Extract the aggregate result from the query result
-            result[column] = query_result.result.get(self.query_type.lower(), 0)
-
-        return {
-            "schema": self.database,
-            self.query_type: result,
-        }
-
-
 # Register the commands
 LoadColumnsCommand.register("load columns")
-AggregateQueryCommand.register("aggregate query")
 CalculateBoundsCommand.register("get bounds")
 LoadInstrumentCommand.register("load instrument")
