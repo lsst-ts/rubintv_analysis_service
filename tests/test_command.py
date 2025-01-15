@@ -38,57 +38,79 @@ class TestCommand(utils.RasTestCase):
 
 
 class TestLoadColumnsWithAggregatorCommand(TestCommand):
-    def test_count_rows(self):
-        columns = [
+    def setUpTest(self):
+        """
+        Set up common test parameters.
+        """
+        self.columns = [
             "exposure.ra",
             "exposure.dec",
         ]
-        command = {
+        self.database = "testdb"
+        self.base_command = {
             "name": "load columns",
             "parameters": {
-                "database": "testdb",
-                "columns": columns,
+                "database": self.database,
+                "columns": self.columns,
+            },
+        }
+
+    def test_count_rows(self):
+        """
+        Test counting rows with an aggregator.
+        """
+        self.setUpTest()
+        command = {
+            **self.base_command,
+            "parameters": {
+                **self.base_command["parameters"],
                 "aggregator": "count",
             },
         }
         content = self.execute_command(command, "table columns")
         data = content["data"]
-        self.assertEqual(data, {columns[0]: 7, columns[1]: 7})
+        self.assertEqual(data, {self.columns[0]: 7, self.columns[1]: 7})
 
     def test_sum_rows(self):
-        columns = [
-            "exposure.ra",
-            "exposure.dec",
-        ]
+        """
+        Test summing rows with an aggregator.
+        """
+        self.setUpTest()
         command = {
-            "name": "load columns",
+            **self.base_command,
             "parameters": {
-                "database": "testdb",
-                "columns": columns,
+                **self.base_command["parameters"],
                 "aggregator": "sum",
             },
         }
         content = self.execute_command(command, "table columns")
-        data = content["data"]
-        print(data)
         self.assertEqual(data, {"exposure.ra": 370.0, "exposure.dec": 20.0})
 
-    def test_max_rows(self):
-        columns = [
-            "exposure.ra",
-            "exposure.dec",
-        ]
+    def test_aggregator_with_conditions(self):
+        """
+        Test applying an aggregator with additional query conditions.
+        """
+        self.setUpTest()
+        query = {
+            "type": "EqualityQuery",
+            "field": {
+                "schema": "visit1_quicklook",
+                "name": "exp_time",
+            },
+            "rightOperator": "eq",
+            "rightValue": 30,
+        }
         command = {
-            "name": "load columns",
+            **self.base_command,
             "parameters": {
-                "database": "testdb",
-                "columns": columns,
-                "aggregator": "max",
+                **self.base_command["parameters"],
+                "aggregator": "avg",  # Average RA and DEC
+                "query": query,
             },
         }
         content = self.execute_command(command, "table columns")
         data = content["data"]
-        self.assertEqual(data, {columns[0]: 100.0, columns[1]: 50.0})
+        self.assertEqual(data, {"exposure.ra": 30.0, "exposure.dec": -20.0})
 
 
 class TestCalculateBoundsCommand(TestCommand):
