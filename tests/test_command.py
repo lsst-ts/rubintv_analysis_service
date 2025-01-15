@@ -83,7 +83,8 @@ class TestLoadColumnsWithAggregatorCommand(TestCommand):
                 "aggregator": "sum",
             },
         }
-        data = self.execute_command(command, "table columns")
+        content = self.execute_command(command, "table columns")
+        data = content["data"]
         self.assertEqual(data, {"exposure.ra": 370.0, "exposure.dec": 20.0})
 
     def test_aggregator_with_conditions(self):
