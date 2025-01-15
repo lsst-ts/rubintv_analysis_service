@@ -494,7 +494,8 @@ class ConsDbSchema:
             query_model = sqlalchemy.and_(query_model, query_result.result)
             table_names.update(query_result.tables)
 
-        # Build the `FROM` clause after ensuring all required table names are included
+        # Build the `FROM` clause after ensuring all required table names are
+        # included
         select_from = self.joins.build_join(table_names)
 
         if data_ids is not None:
