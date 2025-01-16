@@ -72,6 +72,7 @@ class LoadColumnsCommand(BaseCommand):
     global_query: dict | None = None
     day_obs: str | None = None
     data_ids: list[tuple[int, int]] | None = None
+    aggregator: str | None = None
     response_type: str = "table columns"
 
     def build_contents(self, data_center: DataCenter) -> dict:
@@ -111,7 +112,7 @@ class LoadColumnsCommand(BaseCommand):
                     operator="AND",
                 )
 
-        data = database.query(self.columns, query, self.data_ids)
+        data = database.query(self.columns, query, self.data_ids, self.aggregator)
 
         if not data:
             # There is no data to return
@@ -121,7 +122,6 @@ class LoadColumnsCommand(BaseCommand):
             "columns": self.columns,
             "data": data,
         }
-
         return content
 
 

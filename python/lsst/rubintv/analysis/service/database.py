@@ -352,6 +352,21 @@ class ConsDbSchema:
         index_columns = _table["index_columns"]
         return DatabaseSelectionId(data_id=self.get_data_id(table), columns=index_columns)
 
+    def get_table(self, table: str) -> sqlalchemy.Table:
+        """Return the table model for a table.
+
+        Parameters
+        ----------
+        table :
+            The name of the table in the database.
+
+        Returns
+        -------
+        result :
+            The table model for the table.
+        """
+        return self.tables[table]
+
     def get_column(self, column: str) -> sqlalchemy.Column:
         """Return the column model for a column.
 
@@ -386,7 +401,7 @@ class ConsDbSchema:
         return {str(col): [row[i] for row in data] for i, col in enumerate(result.keys())}
 
     def get_column_models(
-        self, columns: list[str]
+        self, columns: list[str], using_aggregator: bool
     ) -> tuple[set[sqlalchemy.Column], set[str], list[sqlalchemy.Column]]:
         """Return the sqlalchemy models for a list of columns.
 
@@ -394,6 +409,9 @@ class ConsDbSchema:
         ----------
         columns :
             The names of the columns in the database.
+        using_aggregator : bool
+            True if aggregator is being used for this query.
+
 
         Returns
         -------
@@ -419,14 +437,17 @@ class ConsDbSchema:
             table_columns.add(seq_num_column.label("seq_num"))
             return [day_obs_column, seq_num_column]
 
-        if list(table_names)[0] in visit1_tables:
-            data_id_columns = add_data_ids("visit1")
-            table_names.add("visit1")
-        elif list(table_names)[0] in exposure_tables:
-            data_id_columns = add_data_ids("exposure")
-            table_names.add("exposure")
+        if not using_aggregator:
+            if list(table_names)[0] in visit1_tables:
+                data_id_columns = add_data_ids("visit1")
+                table_names.add("visit1")
+            elif list(table_names)[0] in exposure_tables:
+                data_id_columns = add_data_ids("exposure")
+                table_names.add("exposure")
+            else:
+                raise ValueError(f"Unsupported table name: {list(table_names)[0]}")
         else:
-            raise ValueError(f"Unsupported table name: {list(table_names)[0]}")
+            data_id_columns = [None, None]
 
         return table_columns, table_names, data_id_columns
 
@@ -435,49 +456,76 @@ class ConsDbSchema:
         columns: list[str],
         query: Query | None = None,
         data_ids: list[tuple[int, int]] | None = None,
-    ) -> dict[str, list]:
-        """Query a table and return the results
+        aggregator: str | None = None,
+    ) -> dict[str, list] | dict[str, int]:
+        """
+        Query a table and return the results.
 
         Parameters
         ----------
-        columns :
+        columns : list[str]
             The ``table.column`` names of the columns to load.
-        query :
-            A query used on the table.
-            If `query` is ``None`` then all the rows
-            in the query are returned.
-        data_ids :
+        query : Query | None
+            A query used on the table. If `query` is None, all rows are
+            returned.
+        data_ids : list[tuple[int, int]] | None
             The data IDs to query, in the format ``(day_obs, seq_num)``.
+        aggregator : str | None
+            The SQL aggregation function to apply (e.g., 'sum', 'avg').
 
         Returns
         -------
-        result :
-            A dictionary of columns as keys and lists of values as values.
+        result : dict[str, list] | dict[str, int]
+            A dictionary of columns as keys and lists of values or aggregated
+            results as values.
         """
         # Get the models for the columns
-        table_columns, table_names, data_id_columns = self.get_column_models(columns)
-        day_obs_column, seq_num_column = data_id_columns
+        table_columns, table_names, data_id_columns = self.get_column_models(columns, aggregator is not None)
+        if data_id_columns:
+            day_obs_column, seq_num_column = data_id_columns
 
-        logger.info(f"table names: {table_names}")
+        logger.info(f"Table names: {table_names}")
 
-        # generate the query
+        # Generate the base query
         query_model = sqlalchemy.and_(*[col.isnot(None) for col in table_columns])
+
         if query is not None:
             query_result = query(self)
             query_model = sqlalchemy.and_(query_model, query_result.result)
             table_names.update(query_result.tables)
+
+        # Build the `FROM` clause after ensuring all required table names are
+        # included
+        select_from = self.joins.build_join(table_names)
+
         if data_ids is not None:
             data_id_select = sqlalchemy.tuple_(day_obs_column, seq_num_column).in_(data_ids)
             query_model = sqlalchemy.and_(query_model, data_id_select)
 
-        # Build the join
-        select_from = self.joins.build_join(table_names)
+        if aggregator is not None:
+            # Validate and apply the aggregator
+            try:
+                aggregate_func = getattr(sqlalchemy.func, aggregator.lower())
+            except AttributeError:
+                raise ValueError(f"Invalid aggregator '{aggregator}' provided.")
 
-        # Build the query
-        query_model = sqlalchemy.select(*table_columns).select_from(select_from).where(query_model)
+            query_model = (
+                sqlalchemy.select(*[aggregate_func(column) for column in table_columns])
+                .select_from(select_from)
+                .where(query_model)
+            )
+        else:
+            # Build the standard query
+            query_model = sqlalchemy.select(*table_columns).select_from(select_from).where(query_model)
 
         # Fetch the data
         result = self.fetch_data(query_model)
+
+        # Adjust result structure for aggregator
+        if aggregator is not None:
+            # Flatten result for single aggregated value
+            values = iter(result.values())
+            return {column.key: next(values)[0] for column in table_columns}
 
         return result
 

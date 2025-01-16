@@ -37,6 +37,83 @@ class TestCommand(utils.RasTestCase):
         return result["content"]
 
 
+class TestLoadColumnsWithAggregatorCommand(TestCommand):
+    def setUpTest(self):
+        """
+        Set up common test parameters.
+        """
+        self.columns = [
+            "exposure.ra",
+            "exposure.dec",
+        ]
+        self.database = "testdb"
+        self.base_command = {
+            "name": "load columns",
+            "parameters": {
+                "database": self.database,
+                "columns": self.columns,
+            },
+        }
+
+    def test_count_rows(self):
+        """
+        Test counting rows with an aggregator.
+        """
+        self.setUpTest()
+        command = {
+            **self.base_command,
+            "parameters": {
+                **self.base_command["parameters"],
+                "aggregator": "count",
+            },
+        }
+        content = self.execute_command(command, "table columns")
+        data = content["data"]
+        self.assertEqual(data, {self.columns[0]: 7, self.columns[1]: 7})
+
+    def test_sum_rows(self):
+        """
+        Test summing rows with an aggregator.
+        """
+        self.setUpTest()
+        command = {
+            **self.base_command,
+            "parameters": {
+                **self.base_command["parameters"],
+                "aggregator": "sum",
+            },
+        }
+        content = self.execute_command(command, "table columns")
+        data = content["data"]
+        self.assertEqual(data, {"exposure.ra": 370.0, "exposure.dec": 20.0})
+
+    def test_aggregator_with_conditions(self):
+        """
+        Test applying an aggregator with additional query conditions.
+        """
+        self.setUpTest()
+        query = {
+            "type": "EqualityQuery",
+            "field": {
+                "schema": "visit1_quicklook",
+                "name": "exp_time",
+            },
+            "rightOperator": "eq",
+            "rightValue": 30,
+        }
+        command = {
+            **self.base_command,
+            "parameters": {
+                **self.base_command["parameters"],
+                "aggregator": "avg",  # Average RA and DEC
+                "query": query,
+            },
+        }
+        content = self.execute_command(command, "table columns")
+        data = content["data"]
+        self.assertEqual(data, {"exposure.ra": 30.0, "exposure.dec": -20.0})
+
+
 class TestCalculateBoundsCommand(TestCommand):
     def test_calculate_bounds_command(self):
         command = {
@@ -67,6 +144,7 @@ class TestLoadColumnsCommand(TestCommand):
 
         content = self.execute_command(command, "table columns")
         data = content["data"]
+        print(data)
 
         truth = cast(
             astropy.table.Table,
