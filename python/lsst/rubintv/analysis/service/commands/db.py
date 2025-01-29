@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..command import BaseCommand
-from ..database import exposure_tables, visit1_tables, SchemaInspector
+from ..database import SchemaInspector, exposure_tables, visit1_tables
 from ..query import EqualityQuery, ParentQuery, Query
 
 if TYPE_CHECKING:

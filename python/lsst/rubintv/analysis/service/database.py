@@ -575,7 +575,8 @@ class ConsDbSchema:
         Returns
         -------
         bool
-            True if the column contains at least one non-null value, False otherwise.
+            True if the column contains at least one non-null value, False
+            otherwise.
         """
         try:
             table_name, column_name = column.split(".")
