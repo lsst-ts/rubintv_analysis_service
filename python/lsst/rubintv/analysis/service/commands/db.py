@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from ..data import DataCenter
 
 
-logger = logging.getLogger("lsst.rubintv.analysis.service.commands.db")
+logger = logging.getLogger("lsst.rubintv.analysis.service.worker")
 
 
 @dataclass(kw_only=True)
@@ -204,7 +204,18 @@ class LoadInstrumentCommand(BaseCommand):
         schema_name = f"cdb_{instrument}"
         try:
             database = data_center.schemas[schema_name]
-            result["schema"] = database.schema
+            schema = database.schema
+
+            logger.info(f"DB schema: {schema}")
+            # Remove columns that are empty
+            filtered_schema = {
+                column: dtype for column, dtype in schema.items() if database.has_non_null_values(column)
+            }
+
+            result["schema"] = filtered_schema
+
+            if not filtered_schema:
+                logger.warning(f"All columns in {schema_name} are empty. Returning an empty schema.")
         except KeyError:
             logger.warning(f"No database connection available for {schema_name}")
             logger.warning(f"Available databases: {data_center.schemas.keys()}")

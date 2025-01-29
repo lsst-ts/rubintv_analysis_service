@@ -563,3 +563,37 @@ class ConsDbSchema:
             else:
                 raise ValueError(f"Could not calculate the max of column {column}")
         return col_min, col_max
+
+    def has_non_null_values(self, column: str) -> bool:
+        """Check if a column contains any non-null values.
+
+        Parameters
+        ----------
+        column : str
+            The column to check, in the format "table.column".
+
+        Returns
+        -------
+        bool
+            True if the column contains at least one non-null value, False otherwise.
+        """
+        try:
+            table_name, column_name = column.split(".")
+            if table_name not in self.tables:
+                logger.warning(f"Table '{table_name}' not found in database schema.")
+                return False
+
+            _table = self.tables[table_name]
+            _column = _table.columns[column_name]
+
+            # Query to check if at least one non-null value exists
+            query = sqlalchemy.select(_column).where(_column.isnot(None)).limit(1)
+
+            with self.engine.connect() as connection:
+                result = connection.execute(query).fetchone()
+
+            return result is not None  # True if we found at least one non-null value
+
+        except Exception as e:
+            logger.error(f"Error checking non-null values for column '{column}': {e}")
+            return False
