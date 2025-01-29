@@ -597,3 +597,61 @@ class ConsDbSchema:
         except Exception as e:
             logger.error(f"Error checking non-null values for column '{column}': {e}")
             return False
+
+
+class SchemaInspector:
+    def __init__(self, schema):
+        self.schema = schema
+
+    def get_table_names(self):
+        return [table["name"] for table in self.schema["tables"]]
+
+    def get_all_table_columns(self):
+        table_columns = []
+        for table in self.schema["tables"]:
+            table_columns.extend([f"{table['name']}.{column['name']}" for column in table["columns"]])
+        return table_columns
+
+    def get_schema(self, filtered_table_columns=None):
+        """
+        Retrieve a copy of the database schema.
+
+        Parameters
+        ----------
+            filtered_table_columns: `list, optional`
+                A list of columns in the form `table.column` to
+                filter the schema. If None, the entire schema is returned.
+
+        Returns
+        -------
+            schema: `dict`
+                A copy of the database schema.
+        """
+        if filtered_table_columns is None:
+            return self.schema
+
+        filtered_schema = {
+            "name": self.schema["name"],
+            "@id": self.schema["@id"],
+            "description": self.schema["description"],
+            "version": self.schema["version"],
+            "tables": [],
+        }
+
+        for table in self.schema["tables"]:
+            filtered_columns = [
+                column
+                for column in table["columns"]
+                if f"{table['name']}.{column['name']}" in filtered_table_columns
+            ]
+            if filtered_columns:
+                filtered_table = {
+                    "name": table["name"],
+                    "@id": table["@id"],
+                    "primaryKey": table["primaryKey"],
+                    "constraints": table.get("constraints", []),
+                    "columns": filtered_columns,
+                }
+                filtered_schema["tables"].append(filtered_table)
+
+        return filtered_schema

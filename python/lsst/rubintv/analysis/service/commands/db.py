@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..command import BaseCommand
-from ..database import exposure_tables, visit1_tables
+from ..database import exposure_tables, visit1_tables, SchemaInspector
 from ..query import EqualityQuery, ParentQuery, Query
 
 if TYPE_CHECKING:
@@ -204,17 +204,15 @@ class LoadInstrumentCommand(BaseCommand):
         schema_name = f"cdb_{instrument}"
         try:
             database = data_center.schemas[schema_name]
-            schema = database.schema
+            schema = SchemaInspector(database.schema)
 
-            logger.info(f"DB schema: {schema}")
-            # Remove columns that are empty
-            filtered_schema = {
-                column: dtype for column, dtype in schema.items() if database.has_non_null_values(column)
-            }
+            all_columns = schema.get_all_table_columns()
+            filtered_columns = [c for c in all_columns if database.has_non_null_values(c)]
+            filtered_schema = schema.get_schema(filtered_columns)
 
             result["schema"] = filtered_schema
 
-            if not filtered_schema:
+            if not filtered_columns:
                 logger.warning(f"All columns in {schema_name} are empty. Returning an empty schema.")
         except KeyError:
             logger.warning(f"No database connection available for {schema_name}")
