@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from ..data import DataCenter
 
 
-logger = logging.getLogger("lsst.rubintv.analysis.service.worker")
+logger = logging.getLogger("lsst.rubintv.analysis.db.commands")
 
 
 @dataclass(kw_only=True)
