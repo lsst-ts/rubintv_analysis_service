@@ -90,3 +90,6 @@ tables:
       - name: exp_time
         datatype: double
         description: Spatially-averaged duration of exposure, accurate to 10ms.
+      - name: empty_column
+        datatype: char
+        description: An empty column for testing purposes.

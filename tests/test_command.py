@@ -26,6 +26,8 @@ import astropy.table
 import lsst.rubintv.analysis.service as lras
 import pytest
 import utils
+import sys
+from unittest.mock import patch, MagicMock
 
 
 class TestCommand(utils.RasTestCase):
@@ -35,6 +37,38 @@ class TestCommand(utils.RasTestCase):
         result = json.loads(response)
         self.assertEqual(result["type"], response_type)
         return result["content"]
+
+
+class TestLoadInstrumentCommand(TestCommand):
+    @patch.dict(
+        "sys.modules",
+        {
+            "lsst": MagicMock(),
+            "lsst.obs": MagicMock(),
+            "lsst.obs.lsst": MagicMock(),
+            "lsst.afw.cameraGeom": MagicMock(),
+        },
+    )
+    def test_load_instrument_command(self):
+        command = {
+            "name": "load instrument",
+            "parameters": {
+                "instrument": "testdb",
+            },
+        }
+        content = self.execute_command(command, response_type="instrument info")
+
+        # Check that empty columns are not included in the returned schema
+        data = utils.get_visit_data_dict()
+        if "visit1_quicklook.empty_column" in data:
+            del data["visit1_quicklook.empty_column"]
+
+        visit1_quicklook = [
+            table for table in content["schema"]["tables"] if table["name"] == "visit1_quicklook"
+        ][0]
+        column_names = [f"visit1_quicklook.{column['name']}" for column in visit1_quicklook["columns"]]
+
+        self.assertListEqual(column_names, list(data.keys()))
 
 
 class TestLoadColumnsWithAggregatorCommand(TestCommand):
