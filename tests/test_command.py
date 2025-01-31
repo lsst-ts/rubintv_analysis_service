@@ -21,13 +21,12 @@
 
 import json
 from typing import cast
+from unittest.mock import MagicMock, patch
 
 import astropy.table
 import lsst.rubintv.analysis.service as lras
 import pytest
 import utils
-import sys
-from unittest.mock import patch, MagicMock
 
 
 class TestCommand(utils.RasTestCase):
