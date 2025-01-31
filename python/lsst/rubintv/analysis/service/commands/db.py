@@ -26,14 +26,14 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..command import BaseCommand
-from ..database import SchemaInspector, exposure_tables, visit1_tables
+from ..database import exposure_tables, visit1_tables
 from ..query import EqualityQuery, ParentQuery, Query
 
 if TYPE_CHECKING:
     from ..data import DataCenter
 
 
-logger = logging.getLogger("lsst.rubintv.analysis.db.commands")
+logger = logging.getLogger("lsst.rubintv.analysis.service.commands.db")
 
 
 @dataclass(kw_only=True)
@@ -181,19 +181,22 @@ class LoadInstrumentCommand(BaseCommand):
                 camera = Latiss.getCamera()
             case "lsstcomcamsim":
                 camera = LsstComCamSim.getCamera()
+            case "testdb":
+                camera = None
             case _:
                 raise ValueError(f"Unsupported instrument: {instrument}")
 
         detectors = []
-        for detector in camera:
-            corners = [(c.getX(), c.getY()) for c in detector.getCorners(FOCAL_PLANE)]
-            detectors.append(
-                {
-                    "id": detector.getId(),
-                    "name": detector.getName(),
-                    "corners": corners,
-                }
-            )
+        if camera is not None:
+            for detector in camera:
+                corners = [(c.getX(), c.getY()) for c in detector.getCorners(FOCAL_PLANE)]
+                detectors.append(
+                    {
+                        "id": detector.getId(),
+                        "name": detector.getName(),
+                        "corners": corners,
+                    }
+                )
 
         result = {
             "instrument": self.instrument,
@@ -201,19 +204,11 @@ class LoadInstrumentCommand(BaseCommand):
         }
 
         # Load the data base to access the schema
-        schema_name = f"cdb_{instrument}"
+        schema_name = f"cdb_{instrument}" if instrument != "testdb" else "testdb"
         try:
             database = data_center.schemas[schema_name]
-            schema = SchemaInspector(database.schema)
+            result["schema"] = database.get_verified_schema()
 
-            all_columns = schema.get_all_table_columns()
-            filtered_columns = [c for c in all_columns if database.has_non_null_values(c)]
-            filtered_schema = schema.get_schema(filtered_columns)
-
-            result["schema"] = filtered_schema
-
-            if not filtered_columns:
-                logger.warning(f"All columns in {schema_name} are empty. Returning an empty schema.")
         except KeyError:
             logger.warning(f"No database connection available for {schema_name}")
             logger.warning(f"Available databases: {data_center.schemas.keys()}")

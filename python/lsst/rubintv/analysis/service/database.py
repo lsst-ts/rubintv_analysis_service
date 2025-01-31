@@ -599,39 +599,18 @@ class ConsDbSchema:
             logger.error(f"Error checking non-null values for column '{column}': {e}")
             return False
 
-
-class SchemaInspector:
-    def __init__(self, schema: dict):
-        self.schema = schema
-
-    def get_all_table_columns(self) -> list[str]:
-        """Retrieve all columns in the form `table.column`."""
-        return [
+    def get_verified_schema(self):
+        all_columns = [
             f"{table['name']}.{column['name']}"
             for table in self.schema.get("tables", [])
             for column in table.get("columns", [])
         ]
+        filtered_table_columns = [column for column in all_columns if self.has_non_null_values(column)]
 
-    def get_schema(self, filtered_table_columns: list[str] | None = None) -> dict:
-        """
-        Retrieve a copy of the database schema with optional column filtering.
-
-        Parameters
-        ----------
-        filtered_table_columns : list[str], optional
-            List of columns in the form `table.column` to keep.
-            If None, returns the entire schema.
-
-        Returns
-        -------
-        dict
-            A filtered copy of the schema.
-        """
         if filtered_table_columns is None:
             return self.schema  # Return full schema if no filtering is needed
 
-        # Copy schema structure dynamically, excluding tables
-        filtered_schema = {key: value for key, value in self.schema.items() if key != "tables"}
+        filtered_schema = self.schema.copy()
         filtered_schema["tables"] = []
 
         # Process tables dynamically
@@ -646,5 +625,8 @@ class SchemaInspector:
                 filtered_table = {key: value for key, value in table.items() if key != "columns"}
                 filtered_table["columns"] = filtered_columns
                 filtered_schema["tables"].append(filtered_table)
+
+            if not filtered_columns:
+                logger.warning(f"All columns in {self.schema['name']} are empty. Returning an empty schema.")
 
         return filtered_schema
