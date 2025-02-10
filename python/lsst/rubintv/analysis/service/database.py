@@ -563,3 +563,70 @@ class ConsDbSchema:
             else:
                 raise ValueError(f"Could not calculate the max of column {column}")
         return col_min, col_max
+
+    def has_non_null_values(self, column: str) -> bool:
+        """Check if a column contains any non-null values.
+
+        Parameters
+        ----------
+        column : str
+            The column to check, in the format "table.column".
+
+        Returns
+        -------
+        bool
+            True if the column contains at least one non-null value, False
+            otherwise.
+        """
+        try:
+            table_name, column_name = column.split(".")
+            if table_name not in self.tables:
+                logger.warning(f"Table '{table_name}' not found in database schema.")
+                return False
+
+            _table = self.tables[table_name]
+            _column = _table.columns[column_name]
+
+            # Query to check if at least one non-null value exists
+            query = sqlalchemy.select(_column).where(_column.isnot(None)).limit(1)
+
+            with self.engine.connect() as connection:
+                result = connection.execute(query).fetchone()
+
+            return result is not None  # True if we found at least one non-null value
+
+        except Exception as e:
+            logger.error(f"Error checking non-null values for column '{column}': {e}")
+            return False
+
+    def get_verified_schema(self):
+        all_columns = [
+            f"{table['name']}.{column['name']}"
+            for table in self.schema.get("tables", [])
+            for column in table.get("columns", [])
+        ]
+        filtered_table_columns = [column for column in all_columns if self.has_non_null_values(column)]
+
+        if filtered_table_columns is None:
+            return self.schema  # Return full schema if no filtering is needed
+
+        filtered_schema = self.schema.copy()
+        filtered_schema["tables"] = []
+
+        # Process tables dynamically
+        for table in self.schema.get("tables", []):
+            filtered_columns = [
+                column
+                for column in table.get("columns", [])
+                if f"{table['name']}.{column['name']}" in filtered_table_columns
+            ]
+            if filtered_columns:
+                # Preserve all table metadata dynamically
+                filtered_table = {key: value for key, value in table.items() if key != "columns"}
+                filtered_table["columns"] = filtered_columns
+                filtered_schema["tables"].append(filtered_table)
+
+            if not filtered_columns:
+                logger.warning(f"All columns in {self.schema['name']} are empty. Returning an empty schema.")
+
+        return filtered_schema

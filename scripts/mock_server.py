@@ -242,7 +242,6 @@ def main():
     for logger_name in [
         "lsst.rubintv.analysis.service.worker",
         "lsst.rubintv.analysis.service.client",
-        "lsst.rubintv.analysis.service.server",
     ]:
         logger = logging.getLogger(logger_name)
         logger.setLevel(log_level)

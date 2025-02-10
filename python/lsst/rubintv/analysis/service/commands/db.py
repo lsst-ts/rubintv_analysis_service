@@ -181,19 +181,22 @@ class LoadInstrumentCommand(BaseCommand):
                 camera = Latiss.getCamera()
             case "lsstcomcamsim":
                 camera = LsstComCamSim.getCamera()
+            case "testdb":
+                camera = None
             case _:
                 raise ValueError(f"Unsupported instrument: {instrument}")
 
         detectors = []
-        for detector in camera:
-            corners = [(c.getX(), c.getY()) for c in detector.getCorners(FOCAL_PLANE)]
-            detectors.append(
-                {
-                    "id": detector.getId(),
-                    "name": detector.getName(),
-                    "corners": corners,
-                }
-            )
+        if camera is not None:
+            for detector in camera:
+                corners = [(c.getX(), c.getY()) for c in detector.getCorners(FOCAL_PLANE)]
+                detectors.append(
+                    {
+                        "id": detector.getId(),
+                        "name": detector.getName(),
+                        "corners": corners,
+                    }
+                )
 
         result = {
             "instrument": self.instrument,
@@ -201,10 +204,11 @@ class LoadInstrumentCommand(BaseCommand):
         }
 
         # Load the data base to access the schema
-        schema_name = f"cdb_{instrument}"
+        schema_name = f"cdb_{instrument}" if instrument != "testdb" else "testdb"
         try:
             database = data_center.schemas[schema_name]
-            result["schema"] = database.schema
+            result["schema"] = database.get_verified_schema()
+
         except KeyError:
             logger.warning(f"No database connection available for {schema_name}")
             logger.warning(f"Available databases: {data_center.schemas.keys()}")

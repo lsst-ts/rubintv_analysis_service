@@ -126,6 +126,7 @@ def get_visit_data_dict() -> dict:
     return {
         "visit1_quicklook.visit_id": [2, 4, 6, 8, 10, 12, 14, 16, 18, 20],
         "visit1_quicklook.exp_time": [30, 30, 10, 15, 15, 30, 30, 30, 15, 20],
+        "visit1_quicklook.empty_column": [None] * 10,
     }
 
 
