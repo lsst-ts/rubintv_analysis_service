@@ -620,6 +620,7 @@ class ConsDbSchema:
                 for column in table.get("columns", [])
                 if f"{table['name']}.{column['name']}" in filtered_table_columns
             ]
+            logger.info(f"Filtered columns: {filtered_columns}")
             if filtered_columns:
                 # Preserve all table metadata dynamically
                 filtered_table = {key: value for key, value in table.items() if key != "columns"}
@@ -627,6 +628,6 @@ class ConsDbSchema:
                 filtered_schema["tables"].append(filtered_table)
 
             if not filtered_columns:
-                logger.warning(f"All columns in {self.schema['name']} are empty. Returning an empty schema.")
+                logger.warning(f"All columns in {self.schema['name']}:{table['name']} are empty.")
 
         return filtered_schema
