@@ -36,7 +36,7 @@ jobs:
 
       - name: Install documenteer
         run: |
-          pip install 'sphinx<7'
+          pip install 'sphinx<8'
           pip install 'documenteer[pipelines]==0.8.2'
 
       - name: Build documentation
