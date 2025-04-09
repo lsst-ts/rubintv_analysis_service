@@ -64,6 +64,9 @@ class LoadColumnsCommand(BaseCommand):
         The data IDs to filter the data on.
         If data_ids is specified then only rows with the specified
         day_obs and seq_num are selected.
+    aggregator :
+        The aggregator to use to combine the data.
+        If `aggregator` is ``None`` then no aggregation is done.
     """
 
     database: str
@@ -76,6 +79,8 @@ class LoadColumnsCommand(BaseCommand):
     response_type: str = "table columns"
 
     def build_contents(self, data_center: DataCenter) -> dict:
+        if self.aggregator is not None:
+            self.response_type = f"aggregated {self.aggregator}"
         # Query the database to return the requested columns
         database = data_center.schemas[self.database]
 

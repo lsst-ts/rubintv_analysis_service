@@ -163,7 +163,10 @@ class BaseCommand(ABC):
             Connections to databases, the Butler, and the EFD.
 
         """
-        self.result = {"type": self.response_type, "content": self.build_contents(data_center)}
+        self.result = {
+            "content": self.build_contents(data_center),
+            "type": self.response_type,
+        }
 
     def to_json(self, request_id: str | None = None):
         """Convert the `result` into JSON."""

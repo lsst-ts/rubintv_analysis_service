@@ -100,7 +100,7 @@ class TestLoadColumnsWithAggregatorCommand(TestCommand):
                 "aggregator": "count",
             },
         }
-        content = self.execute_command(command, "table columns")
+        content = self.execute_command(command, "aggregated count")
         data = content["data"]
         self.assertEqual(data, {self.columns[0]: 7, self.columns[1]: 7})
 
@@ -116,7 +116,7 @@ class TestLoadColumnsWithAggregatorCommand(TestCommand):
                 "aggregator": "sum",
             },
         }
-        content = self.execute_command(command, "table columns")
+        content = self.execute_command(command, "aggregated sum")
         data = content["data"]
         self.assertEqual(data, {"exposure.ra": 370.0, "exposure.dec": 20.0})
 
@@ -142,7 +142,7 @@ class TestLoadColumnsWithAggregatorCommand(TestCommand):
                 "query": query,
             },
         }
-        content = self.execute_command(command, "table columns")
+        content = self.execute_command(command, "aggregated avg")
         data = content["data"]
         self.assertEqual(data, {"exposure.ra": 30.0, "exposure.dec": -20.0})
 
