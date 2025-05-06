@@ -2,7 +2,7 @@
 locations:
   dev:
     users_path: /sdf/home/f/fred3m/u/data/dev_users
-    consdb: usdf-summitdb.slac.stanford.edu
+    consdb: usdf-summitdb-replica.slac.stanford.edu
     butlers:
       - embargo
     # efd_url: connection info here
@@ -16,7 +16,7 @@ locations:
   usdf:
     users_path: /var/ddv-config
     credentials_path: /etc/secrets/postgres-credentials.txt
-    consdb: usdf-summitdb.slac.stanford.edu
+    consdb: usdf-summitdb-replica.slac.stanford.edu
     butlers:
       - embargo
     # efd_url: connection info here
