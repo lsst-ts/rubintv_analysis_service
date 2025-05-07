@@ -24,4 +24,4 @@ schemas:
   cdb_latiss: cdb_latiss.yaml
   cdb_lsstcomcam: cdb_lsstcomcam.yaml
   cdb_lsstcomcamsim: cdb_lsstcomcamsim.yaml
-  # cdb_lsstcam: cdb_lsstcam.yaml
+  cdb_lsstcam: cdb_lsstcam.yaml
