@@ -197,8 +197,11 @@ def execute_command(command_str: str, data_center: DataCenter) -> str:
     data_center :
         Connections to databases, the Butler, and the EFD.
     """
+    logger.info(f"Received command {command_str}")
     try:
         command_dict = json.loads(command_str)
+        if "type" in command_dict and command_dict["type"] == "ping":
+            return json.dumps({"type": "pong"})
         if not isinstance(command_dict, dict):
             raise CommandParsingError(f"Could not generate a valid command from {command_str}")
     except Exception as err:
@@ -207,6 +210,7 @@ def execute_command(command_str: str, data_center: DataCenter) -> str:
         return error_msg(err, traceback_string)
 
     try:
+        logger.info(f"Parsing command {command_dict}")
         if "name" not in command_dict.keys():
             raise CommandParsingError("No command 'name' given")
 
@@ -222,6 +226,7 @@ def execute_command(command_str: str, data_center: DataCenter) -> str:
         return error_msg(CommandParsingError(f"'{err}' error while parsing command"), traceback_string)
 
     try:
+        logger.info(f"Executing command {command_str}")
         command.execute(data_center)
     except Exception as err:
         logging.exception(f"Error executing command {command_dict}")
