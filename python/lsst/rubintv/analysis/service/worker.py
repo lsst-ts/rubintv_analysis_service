@@ -82,10 +82,16 @@ class Worker:
 
         def on_message(ws: WebSocketApp, message: str) -> None:
             """Message received from the server."""
-            logger.info(f"Executing command: {message}")
-            response = execute_command(message, self.data_center)
-            logger.info("Sending response")
-            ws.send(response)
+            logger.info(f"Received message: {message}")
+            logger.info(f"Message type: {type(message)}")
+            if message == "ping":
+                logger.debug("Received ping, sending pong")
+                ws.send("pong")
+                return
+            # logger.info(f"Executing command: {message}")
+            # response = execute_command(message, self.data_center)
+            # logger.info("Sending response")
+            # ws.send(response)
 
         logger.connection(f"Connecting to rubinTV at {self._address}:{self._port}")
 
