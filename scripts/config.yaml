@@ -13,6 +13,13 @@ locations:
     butlers:
       - embargo
     # efd_url: connection info here
+  base:
+    users_path: /var/ddv-config
+    credentials_path: /etc/secrets/postgres-credentials.txt
+    consdb: postgresdb01.ls.lsst.org
+    butlers:
+      - LSSTCam
+    # efd_url: connection info here
   usdf:
     users_path: /var/ddv-config
     credentials_path: /etc/secrets/postgres-credentials.txt
