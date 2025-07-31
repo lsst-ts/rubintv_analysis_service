@@ -126,8 +126,8 @@ def main():
     args = parser.parse_args()
 
     # Ensure that the location is valid
-    if args.location.lower() not in ["summit", "usdf", "dev"]:
-        raise ValueError(f"Invalid location: {args.location}, must be either 'summit', 'usdf' or 'dev'")
+    if args.location.lower() not in ["summit", "base", "usdf", "dev"]:
+        raise ValueError(f"Invalid location: {args.location}, must be either 'summit', 'base', 'usdf' or 'dev'")
 
     # Configure logging for all modules
     log_level = getattr(logging, args.log_all.upper(), None)
