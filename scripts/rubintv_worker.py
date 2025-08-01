@@ -167,6 +167,8 @@ def main():
     with open(config.credentials_path, "r") as file:
         credentials = file.readlines()
     for credential in credentials:
+        if not credential.strip():
+            continue
         _server, _, database, user, password = credential.split(":")
         if _server == config.consdb and database == args.database:
             password = password.strip()
