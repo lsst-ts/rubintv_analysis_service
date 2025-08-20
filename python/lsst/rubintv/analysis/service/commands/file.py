@@ -25,12 +25,9 @@ import logging
 import os
 import shutil
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from ..command import BaseCommand
-
-if TYPE_CHECKING:
-    from ..data import DataCenter
+from ..data import DataCenter
 
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 
@@ -96,6 +93,9 @@ class LoadDirectoryCommand(BaseCommand):
             all_items = os.listdir(full_path)
             files = [f for f in all_items if os.path.isfile(os.path.join(full_path, f))]
             directories = [d for d in all_items if os.path.isdir(os.path.join(full_path, d))]
+            # strip logs directory
+            log_dir = data_center.logs_directory_name
+            directories = [d for d in directories if d != log_dir]
 
             logging.info(f"Directory contents listed: {full_path}")
             return {
@@ -437,5 +437,5 @@ RenameFileCommand.register("rename")
 DeleteFileCommand.register("delete")
 DuplicateFileCommand.register("duplicate")
 MoveFileCommand.register("move")
-SaveFileCommand.register("save")
+# SaveFileCommand.register("save")
 LoadFileCommand.register("load")

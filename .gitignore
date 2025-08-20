@@ -31,6 +31,8 @@ pytest_session.txt
 .cache/
 .pytest_cache
 .coverage
+# result of running tests
+.logs/
 
 # IDEs
 .idea

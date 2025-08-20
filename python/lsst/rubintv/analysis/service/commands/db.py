@@ -23,15 +23,12 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from ..command import BaseCommand
+from ..data import DataCenter
 from ..database import exposure_tables, visit1_tables
+from ..logging import get_persistent_logger
 from ..query import EqualityQuery, ParentQuery, Query
-
-if TYPE_CHECKING:
-    from ..data import DataCenter
-
 
 logger = logging.getLogger("lsst.rubintv.analysis.service.commands.db")
 
@@ -76,6 +73,8 @@ class LoadColumnsCommand(BaseCommand):
     response_type: str = "table columns"
 
     def build_contents(self, data_center: DataCenter) -> dict:
+        persistent_logger = get_persistent_logger(data_center)
+
         # Query the database to return the requested columns
         database = data_center.schemas[self.database]
 
@@ -122,6 +121,8 @@ class LoadColumnsCommand(BaseCommand):
             "columns": self.columns,
             "data": data,
         }
+        if self.aggregator is None:
+            persistent_logger.info(f"Loaded columns from {self.database}: {self.columns}")
         return content
 
 

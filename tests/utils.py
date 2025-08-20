@@ -222,8 +222,17 @@ class RasTestCase(TestCase):
         self.data_center = DataCenter(schemas={"testdb": self.database}, user_path="")
 
     def tearDown(self) -> None:
+        # Clean up database connection
+        if hasattr(self.database, "engine"):
+            self.database.engine.dispose()
+
         self.db_file.close()
         os.remove(self.db_file.name)
+
+        # Clean up any persistent loggers
+        from lsst.rubintv.analysis.service.logging import cleanup_persistent_logger
+
+        cleanup_persistent_logger()
 
     def assertDataTableEqual(self, result: dict | ApTable, truth: ApTable):  # NOQA: N802
         """Check if two data tables are equal.
