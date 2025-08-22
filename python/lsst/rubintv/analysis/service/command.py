@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -151,8 +152,21 @@ class BaseCommand(ABC):
         """
         pass
 
+    def get_log_metadata(self) -> dict:
+        """Return metadata to be logged for this command.
+
+        Override this method to provide command-specific logging information.
+        Should return lightweight metadata, not actual data content.
+
+        Returns
+        -------
+        metadata : dict
+            Dictionary of metadata to log
+        """
+        return {"response_type": self.response_type}
+
     def execute(self, data_center: DataCenter):
-        """Execute the command.
+        """Execute the command with logging.
 
         This method does not return anything, buts sets the `result`,
         the JSON formatted string that is sent to the user.
@@ -163,7 +177,22 @@ class BaseCommand(ABC):
             Connections to databases, the Butler, and the EFD.
 
         """
-        self.result = {"type": self.response_type, "content": self.build_contents(data_center)}
+        from .logging import get_persistent_logger
+
+        persistent_logger = get_persistent_logger(data_center)
+        metadata = self.get_log_metadata()
+
+        try:
+            start_time = time.time()
+            self.result = {"type": self.response_type, "content": self.build_contents(data_center)}
+            execution_time = time.time() - start_time
+
+            command_name = self.__class__.__name__
+            persistent_logger.info(f"{command_name} completed: {metadata} (took {execution_time:.3f}s)")
+
+        except Exception as e:
+            persistent_logger.error(f"Command failed: {metadata} - {str(e)}")
+            raise
 
     def to_json(self, request_id: str | None = None):
         """Convert the `result` into JSON."""

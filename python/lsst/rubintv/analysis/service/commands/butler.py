@@ -94,6 +94,15 @@ class LoadDetectorInfoCommand(BaseCommand):
                 }
         return detector_info
 
+    def get_log_metadata(self) -> dict:
+        """Log metadata specific to detector loading."""
+        base_metadata = super().get_log_metadata()
+        return {
+            **base_metadata,
+            "instrument": self.instrument,
+            "detector_count": len(base_metadata.get("detectors", [])),
+        }
+
 
 @dataclass(kw_only=True)
 class LoadImageCommand(BaseCommand):
@@ -127,6 +136,16 @@ class LoadImageCommand(BaseCommand):
             image = image.image
         return {
             "image": image.array,
+        }
+
+    def get_log_metadata(self):
+        base_metadata = super().get_log_metadata()
+        return {
+            **base_metadata,
+            "repo": self.repo,
+            "image_name": self.image_name,
+            "collection": self.collection,
+            "data_id": self.data_id,
         }
 
 
@@ -184,6 +203,16 @@ class GetFitsImageCommand(BaseCommand):
 
         return {
             "fits": content,
+        }
+
+    def get_log_metadata(self) -> dict:
+        base_metadata = super().get_log_metadata()
+        return {
+            **base_metadata,
+            "repo": self.repo,
+            "image_name": self.image_name,
+            "collection": self.collection,
+            "data_id": self.data_id,
         }
 
 
