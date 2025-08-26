@@ -226,7 +226,7 @@ def execute_command(command_str: str, data_center: DataCenter) -> str:
     data_center :
         Connections to databases, the Butler, and the EFD.
     """
-    logger.info(f"Received command {command_str}")
+    logger.debug(f"Received command {command_str}")
     try:
         command_dict = json.loads(command_str)
         if "type" in command_dict and command_dict["type"] == "ping":
