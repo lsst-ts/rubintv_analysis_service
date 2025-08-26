@@ -23,15 +23,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from ..command import BaseCommand
+from ..data import DataCenter
 from ..database import exposure_tables, visit1_tables
 from ..query import EqualityQuery, ParentQuery, Query
-
-if TYPE_CHECKING:
-    from ..data import DataCenter
-
 
 logger = logging.getLogger("lsst.rubintv.analysis.service.commands.db")
 
@@ -115,7 +111,6 @@ class LoadColumnsCommand(BaseCommand):
         data = database.query(self.columns, query, self.data_ids, self.aggregator)
 
         if not data:
-            # There is no data to return
             data = []
         content = {
             "schema": self.database,
@@ -123,6 +118,21 @@ class LoadColumnsCommand(BaseCommand):
             "data": data,
         }
         return content
+
+    def get_log_metadata(self) -> dict:
+        """Log metadata specific to column loading."""
+        base_metadata = super().get_log_metadata()
+        return {
+            **base_metadata,
+            "database": self.database,
+            "column_count": len(self.columns),
+            "columns": self.columns[:3] + ["..."] if len(self.columns) > 3 else self.columns,
+            "has_query": self.query is not None,
+            "has_global_query": self.global_query is not None,
+            "day_obs": self.day_obs,
+            "data_ids_count": len(self.data_ids) if self.data_ids else 0,
+            "aggregator": self.aggregator,
+        }
 
 
 @dataclass(kw_only=True)

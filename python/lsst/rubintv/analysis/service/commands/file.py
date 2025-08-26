@@ -25,12 +25,9 @@ import logging
 import os
 import shutil
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from ..command import BaseCommand
-
-if TYPE_CHECKING:
-    from ..data import DataCenter
+from ..data import DataCenter
 
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 
@@ -96,8 +93,10 @@ class LoadDirectoryCommand(BaseCommand):
             all_items = os.listdir(full_path)
             files = [f for f in all_items if os.path.isfile(os.path.join(full_path, f))]
             directories = [d for d in all_items if os.path.isdir(os.path.join(full_path, d))]
+            # strip logs directory
+            log_dir = data_center.logs_directory_name
+            directories = [d for d in directories if d != log_dir]
 
-            logging.info(f"Directory contents listed: {full_path}")
             return {
                 "path": self.path,
                 "files": sorted(files),
@@ -109,6 +108,11 @@ class LoadDirectoryCommand(BaseCommand):
         except Exception as e:
             logging.error(f"Unexpected error: {str(e)}")
             return {"error": f"An unexpected error occurred: {str(e)}"}
+
+    def get_log_metadata(self) -> dict:
+        """Log metadata specific to directory operations."""
+        base_metadata = super().get_log_metadata()
+        return {**base_metadata, "path": "/".join(self.path), "path_depth": len(self.path)}
 
 
 @dataclass(kw_only=True)
@@ -146,6 +150,14 @@ class CreateDirectoryCommand(BaseCommand):
         except Exception as e:
             logging.error(f"Unexpected error: {str(e)}")
             return {"error": f"An unexpected error occurred: {str(e)}"}
+
+    def get_log_metadata(self):
+        base_metadata = super().get_log_metadata()
+        return {
+            **base_metadata,
+            "path": self.path,
+            "name": self.name,
+        }
 
 
 @dataclass(kw_only=True)
@@ -190,6 +202,14 @@ class RenameFileCommand(BaseCommand):
             logging.error(f"Unexpected error: {str(e)}")
             return {"error": f"An unexpected error occurred: {str(e)}"}
 
+    def get_log_metadata(self):
+        base_metadata = super().get_log_metadata()
+        return {
+            **base_metadata,
+            "old_path": self.path,
+            "new_name": self.new_name,
+        }
+
 
 @dataclass(kw_only=True)
 class DeleteFileCommand(BaseCommand):
@@ -230,6 +250,13 @@ class DeleteFileCommand(BaseCommand):
             logging.error(f"Unexpected error: {str(e)}")
             return {"error": f"An unexpected error occurred: {str(e)}"}
 
+    def get_log_metadata(self) -> dict:
+        base_metadata = super().get_log_metadata()
+        return {
+            **base_metadata,
+            "path": self.path,
+        }
+
 
 @dataclass(kw_only=True)
 class DuplicateFileCommand(BaseCommand):
@@ -238,7 +265,7 @@ class DuplicateFileCommand(BaseCommand):
     Attributes
     ----------
     path
-        The path to the file or directory to duplicate
+        The path to the file or directory to duplicate.
     """
 
     path: list[str]
@@ -285,6 +312,13 @@ class DuplicateFileCommand(BaseCommand):
         except Exception as e:
             logging.error(f"Unexpected error: {str(e)}")
             return {"error": f"An unexpected error occurred: {str(e)}"}
+
+    def get_log_metadata(self) -> dict:
+        base_metadata = super().get_log_metadata()
+        return {
+            **base_metadata,
+            "path": self.path,
+        }
 
 
 @dataclass(kw_only=True)
@@ -337,6 +371,14 @@ class MoveFileCommand(BaseCommand):
             logging.error(f"Unexpected error: {str(e)}")
             return {"error": f"An unexpected error occurred: {str(e)}"}
 
+    def get_log_metadata(self) -> dict:
+        base_metadata = super().get_log_metadata()
+        return {
+            **base_metadata,
+            "source_path": self.source_path,
+            "destination_path": self.destination_path,
+        }
+
 
 @dataclass(kw_only=True)
 class SaveFileCommand(BaseCommand):
@@ -374,6 +416,14 @@ class SaveFileCommand(BaseCommand):
         except Exception as e:
             logging.error(f"Unexpected error: {str(e)}")
             return {"error": f"An unexpected error occurred: {str(e)}"}
+
+    def get_log_metadata(self) -> dict:
+        base_metadata = super().get_log_metadata()
+        return {
+            **base_metadata,
+            "path": self.path,
+            "file_size_bytes": len(self.content) if hasattr(self, "content") else 0,
+        }
 
 
 @dataclass(kw_only=True)
@@ -429,6 +479,13 @@ class LoadFileCommand(BaseCommand):
             logging.error(f"Unexpected error: {str(e)}")
             return {"error": f"An unexpected error occurred: {str(e)}"}
 
+    def get_log_metadata(self) -> dict:
+        base_metadata = super().get_log_metadata()
+        return {
+            **base_metadata,
+            "path": self.path,
+        }
+
 
 # Register the commands
 LoadDirectoryCommand.register("list directory")
@@ -437,5 +494,4 @@ RenameFileCommand.register("rename")
 DeleteFileCommand.register("delete")
 DuplicateFileCommand.register("duplicate")
 MoveFileCommand.register("move")
-SaveFileCommand.register("save")
 LoadFileCommand.register("load")

@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -159,3 +160,13 @@ class DataCenter:
         self.schemas = schemas
         self.butlers = butlers
         self.efdClient = efd_client
+
+    @property
+    def logs_directory_name(self) -> str:
+        """Name of the logs directory (without path)."""
+        return ".logs"
+
+    @property
+    def logs_path(self) -> str:
+        """Full path to the logs directory."""
+        return os.path.join(self.user_path, self.logs_directory_name)
