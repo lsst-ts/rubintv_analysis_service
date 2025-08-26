@@ -247,6 +247,8 @@ def execute_command(command_str: str, data_center: DataCenter) -> str:
             raise CommandParsingError(f"Unrecognized command '{command_dict['name']}'")
 
         parameters = command_dict.get("parameters", {})
+        if "requestId" in command_dict:
+            parameters["request_id"] = command_dict["requestId"]
         command = BaseCommand.command_registry[command_dict["name"]](**parameters)
 
     except Exception as err:
