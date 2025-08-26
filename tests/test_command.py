@@ -146,6 +146,34 @@ class TestLoadColumnsWithAggregatorCommand(TestCommand):
         data = content["data"]
         self.assertEqual(data, {"exposure.ra": 30.0, "exposure.dec": -20.0})
 
+    def test_count_with_specific_query_structure(self):
+        """
+        Test counting rows with aggregator using the specific query structure
+        format.
+        """
+        command = {
+            "name": "load columns",
+            "parameters": {
+                "aggregator": "count",
+                "database": "testdb",  # Using testdb instead of cdb_lsstcam for test compatibility
+                "columns": [
+                    "exposure.ra",
+                    "exposure.dec",
+                ],  # Using ra/dec instead of s_ra/s_dec for test data compatibility
+                "query": {
+                    "type": "EqualityQuery",
+                    "id": "2",
+                    "field": {"name": "ra", "schema": "exposure", "database": "testdb"},
+                    "rightOperator": "le",
+                    "rightValue": "20",
+                },
+            },
+        }
+        content = self.execute_command(command, "table columns")
+        data = content["data"]
+        # Based on test data, ra values <= 20 are: [10] (2 non-null value)
+        self.assertEqual(data, {"exposure.ra": 2, "exposure.dec": 2})
+
 
 class TestCalculateBoundsCommand(TestCommand):
     def test_calculate_bounds_command(self):
