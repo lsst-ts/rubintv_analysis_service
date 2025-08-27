@@ -11,7 +11,8 @@ locations:
     credentials_path: /etc/secrets/postgres-credentials.txt
     consdb: postgresdb01.cp.lsst.org
     butlers:
-      - embargo
+      - LSSTCam
+      - LATISS
     # efd_url: connection info here
   usdf:
     users_path: /var/ddv-config
