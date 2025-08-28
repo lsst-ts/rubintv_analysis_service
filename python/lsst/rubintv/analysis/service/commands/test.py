@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+
 from ..command import BaseCommand
 from ..data import DataCenter
 
@@ -20,7 +21,10 @@ class TestErrorCommand(BaseCommand):
 
         if self.include_traceback:
             content["traceback"] = (
-                'Traceback (most recent call last):\\n  File "test.py", line 1, in <module>\\n    raise Exception("Test error")\\nException: Test error'
+                "Traceback (most recent call last):\\n"
+                '  File "test.py", line 1, in <module>\\n'
+                '    raise Exception("Test error")\\n'
+                "Exception: Test error"
             )
 
         return content
