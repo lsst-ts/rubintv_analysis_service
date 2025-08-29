@@ -71,6 +71,7 @@ class LoadColumnsCommand(BaseCommand):
     aggregator: str | None = None
     request_id: str | None = None
     response_type: str = "table columns"
+    is_new_plot: bool = False
 
     def build_contents(self, data_center: DataCenter) -> dict:
         # Query the database to return the requested columns
@@ -133,7 +134,7 @@ class LoadColumnsCommand(BaseCommand):
             "day_obs": self.day_obs,
             "data_ids_count": len(self.data_ids) if self.data_ids else 0,
             "aggregator": self.aggregator,
-            "is_new_plot": self.aggregator is None and self.request_id is None,
+            "is_new_plot": self.is_new_plot,
         }
 
 

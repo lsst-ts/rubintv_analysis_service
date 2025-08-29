@@ -265,6 +265,37 @@ class TestLoadColumnsCommand(TestCommand):
         truth = truth[[True, True, False, False, False, True, False, False, False, False]]
         self.assertDataTableEqual(data, truth)
 
+    @patch("lsst.rubintv.analysis.service.commands.db.logger")
+    def test_is_new_plot_logged(self, mock_logger):
+        """Test that is_new_plot=True is reflected in the log metadata."""
+        # Create a LoadColumnsCommand directly to test logging
+        from lsst.rubintv.analysis.service.commands.db import LoadColumnsCommand
+
+        command = LoadColumnsCommand(
+            database="testdb",
+            columns=["exposure.ra", "exposure.dec"],
+            is_new_plot=True,
+        )
+
+        # Execute the command to trigger logging
+        command.build_contents(self.data_center)
+
+        # Get the log metadata
+        log_metadata = command.get_log_metadata()
+
+        # Assert that is_new_plot is True in the metadata
+        self.assertTrue(log_metadata["is_new_plot"])
+
+        # Also test the inverse case
+        command_false = LoadColumnsCommand(
+            database="testdb",
+            columns=["exposure.ra", "exposure.dec"],
+            is_new_plot=False,
+        )
+
+        log_metadata_false = command_false.get_log_metadata()
+        self.assertFalse(log_metadata_false["is_new_plot"])
+
 
 class TestCommandErrors(TestCommand):
     def check_error_response(self, content: dict, error: str, description: str | None = None):
