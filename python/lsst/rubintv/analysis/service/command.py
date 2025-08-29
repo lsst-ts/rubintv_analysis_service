@@ -234,7 +234,7 @@ def execute_command(command_str: str, data_center: DataCenter) -> str:
         if not isinstance(command_dict, dict):
             raise CommandParsingError(f"Could not generate a valid command from {command_str}")
     except Exception as err:
-        logging.exception("Error converting command to JSON.")
+        logger.exception("Error converting command to JSON.")
         traceback_string = traceback.format_exc()
         return error_msg(err, traceback_string)
 
@@ -250,7 +250,7 @@ def execute_command(command_str: str, data_center: DataCenter) -> str:
         command = BaseCommand.command_registry[command_dict["name"]](**parameters)
 
     except Exception as err:
-        logging.exception(f"Error parsing command {command_dict}")
+        logger.exception(f"Error parsing command {command_dict}")
         traceback_string = traceback.format_exc()
         return error_msg(CommandParsingError(f"'{err}' error while parsing command"), traceback_string)
 
@@ -258,7 +258,7 @@ def execute_command(command_str: str, data_center: DataCenter) -> str:
         logger.info(f"Executing command {command_str}")
         command.execute(data_center)
     except Exception as err:
-        logging.exception(f"Error executing command {command_dict}")
+        logger.exception(f"Error executing command {command_dict}")
         traceback_string = traceback.format_exc()
         return error_msg(CommandExecutionError(f"{err} error executing command."), traceback_string)
 
@@ -268,7 +268,7 @@ def execute_command(command_str: str, data_center: DataCenter) -> str:
         else:
             result = command.to_json()
     except Exception as err:
-        logging.exception("Error converting command response to JSON.")
+        logger.exception("Error converting command response to JSON.")
         traceback_string = traceback.format_exc()
         return error_msg(
             CommandResponseError(f"{err} error converting command response to JSON."), traceback_string
