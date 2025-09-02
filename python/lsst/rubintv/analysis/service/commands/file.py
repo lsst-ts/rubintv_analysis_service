@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from ..command import BaseCommand
 from ..data import DataCenter
 
+logger = logging.getLogger("lsst.rubintv.analysis.service.commands.file")
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 
 
@@ -103,10 +104,10 @@ class LoadDirectoryCommand(BaseCommand):
                 "directories": sorted(directories),
             }
         except FileOperationError as e:
-            logging.error(f"File operation error: {str(e)}")
+            logger.error(f"File operation error: {str(e)}")
             return {"error": str(e)}
         except Exception as e:
-            logging.error(f"Unexpected error: {str(e)}")
+            logger.error(f"Unexpected error: {str(e)}")
             return {"error": f"An unexpected error occurred: {str(e)}"}
 
     def get_log_metadata(self) -> dict:
@@ -142,13 +143,13 @@ class CreateDirectoryCommand(BaseCommand):
                 raise FileOperationError("Invalid directory name")
 
             os.makedirs(full_path, exist_ok=True)
-            logging.info(f"Directory created: {full_path}")
+            logger.info(f"Directory created: {full_path}")
             return {"path": full_path, "parent_path": self.path, "name": self.name}
         except FileOperationError as e:
-            logging.error(f"File operation error: {str(e)}")
+            logger.error(f"File operation error: {str(e)}")
             return {"error": str(e)}
         except Exception as e:
-            logging.error(f"Unexpected error: {str(e)}")
+            logger.error(f"Unexpected error: {str(e)}")
             return {"error": f"An unexpected error occurred: {str(e)}"}
 
     def get_log_metadata(self):
@@ -193,13 +194,13 @@ class RenameFileCommand(BaseCommand):
                 raise FileOperationError(f"The new path '{new_path}' already exists. Cannot overwrite.")
 
             os.rename(full_path, new_path)
-            logging.info(f"File renamed: {full_path} to {new_path}")
+            logger.info(f"File renamed: {full_path} to {new_path}")
             return {"new_path": new_path, "new_name": self.new_name, "path": self.path}
         except FileOperationError as e:
-            logging.error(f"File operation error: {str(e)}")
+            logger.error(f"File operation error: {str(e)}")
             return {"error": str(e)}
         except Exception as e:
-            logging.error(f"Unexpected error: {str(e)}")
+            logger.error(f"Unexpected error: {str(e)}")
             return {"error": f"An unexpected error occurred: {str(e)}"}
 
     def get_log_metadata(self):
@@ -235,19 +236,19 @@ class DeleteFileCommand(BaseCommand):
 
             if os.path.isfile(full_path):
                 os.remove(full_path)
-                logging.info(f"File deleted: {full_path}")
+                logger.info(f"File deleted: {full_path}")
                 return {"deleted_path": self.path, "type": "file"}
             elif os.path.isdir(full_path):
                 shutil.rmtree(full_path)
-                logging.info(f"Directory deleted: {full_path}")
+                logger.info(f"Directory deleted: {full_path}")
                 return {"deleted_path": self.path, "type": "directory"}
             else:
                 raise FileOperationError(f"The path '{full_path}' is neither a file nor a directory.")
         except FileOperationError as e:
-            logging.error(f"File operation error: {str(e)}")
+            logger.error(f"File operation error: {str(e)}")
             return {"error": str(e)}
         except Exception as e:
-            logging.error(f"Unexpected error: {str(e)}")
+            logger.error(f"Unexpected error: {str(e)}")
             return {"error": f"An unexpected error occurred: {str(e)}"}
 
     def get_log_metadata(self) -> dict:
@@ -293,7 +294,7 @@ class DuplicateFileCommand(BaseCommand):
 
             if os.path.isfile(full_path):
                 shutil.copy2(full_path, new_path)
-                logging.info(f"File duplicated: {full_path} to {new_path}")
+                logger.info(f"File duplicated: {full_path} to {new_path}")
                 return {
                     "path": self.path[:-1],
                     "old_name": self.path[-1],
@@ -302,15 +303,15 @@ class DuplicateFileCommand(BaseCommand):
                 }
             elif os.path.isdir(full_path):
                 shutil.copytree(full_path, new_path)
-                logging.info(f"Directory duplicated: {full_path} to {new_path}")
+                logger.info(f"Directory duplicated: {full_path} to {new_path}")
                 return {"new_path": new_path, "type": "directory"}
             else:
                 raise FileOperationError(f"The path '{full_path}' is neither a file nor a directory.")
         except FileOperationError as e:
-            logging.error(f"File operation error: {str(e)}")
+            logger.error(f"File operation error: {str(e)}")
             return {"error": str(e)}
         except Exception as e:
-            logging.error(f"Unexpected error: {str(e)}")
+            logger.error(f"Unexpected error: {str(e)}")
             return {"error": f"An unexpected error occurred: {str(e)}"}
 
     def get_log_metadata(self) -> dict:
@@ -358,17 +359,17 @@ class MoveFileCommand(BaseCommand):
             os.makedirs(os.path.dirname(full_destination_path), exist_ok=True)
             shutil.move(full_source_path, full_destination_path)
 
-            logging.info(f"File moved: {full_source_path} to {full_destination_path}")
+            logger.info(f"File moved: {full_source_path} to {full_destination_path}")
             return {
                 "destination_path": self.destination_path,
                 "source_path": self.source_path,
                 "type": "file" if os.path.isfile(full_destination_path) else "directory",
             }
         except FileOperationError as e:
-            logging.error(f"File operation error: {str(e)}")
+            logger.error(f"File operation error: {str(e)}")
             return {"error": str(e)}
         except Exception as e:
-            logging.error(f"Unexpected error: {str(e)}")
+            logger.error(f"Unexpected error: {str(e)}")
             return {"error": f"An unexpected error occurred: {str(e)}"}
 
     def get_log_metadata(self) -> dict:
@@ -408,13 +409,13 @@ class SaveFileCommand(BaseCommand):
             with open(full_path, "w", encoding="utf-8") as f:
                 f.write(self.content)
 
-            logging.info(f"File saved: {full_path}")
+            logger.info(f"File saved: {full_path}")
             return {"saved_path": full_path}
         except FileOperationError as e:
-            logging.error(f"File operation error: {str(e)}")
+            logger.error(f"File operation error: {str(e)}")
             return {"error": str(e)}
         except Exception as e:
-            logging.error(f"Unexpected error: {str(e)}")
+            logger.error(f"Unexpected error: {str(e)}")
             return {"error": f"An unexpected error occurred: {str(e)}"}
 
     def get_log_metadata(self) -> dict:
@@ -464,19 +465,19 @@ class LoadFileCommand(BaseCommand):
             with open(full_path, "r", encoding="utf-8") as f:
                 content = f.read()
 
-            logging.info(f"File loaded: {full_path}")
+            logger.info(f"File loaded: {full_path}")
             return {"content": content, "path": full_path, "size": file_size, "encoding": "utf-8"}
         except FileOperationError as e:
-            logging.error(f"File operation error: {str(e)}")
+            logger.error(f"File operation error: {str(e)}")
             return {"error": str(e)}
         except UnicodeDecodeError:
-            logging.error(f"Unicode decode error: {full_path}")
+            logger.error(f"Unicode decode error: {full_path}")
             return {
                 "error": f"Unable to decode '{full_path}' as UTF-8. "
                 "The file might be binary or use a different encoding."
             }
         except Exception as e:
-            logging.error(f"Unexpected error: {str(e)}")
+            logger.error(f"Unexpected error: {str(e)}")
             return {"error": f"An unexpected error occurred: {str(e)}"}
 
     def get_log_metadata(self) -> dict:
