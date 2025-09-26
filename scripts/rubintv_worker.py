@@ -105,7 +105,7 @@ def main():
         "--location",
         default="usdf",
         type=str,
-        help="Location of the worker (either 'summit', 'usdf', or 'dev')",
+        help="Location of the worker (either 'summit', 'base', 'usdf', or 'dev')",
     )
     parser.add_argument(
         "--log",
@@ -126,8 +126,10 @@ def main():
     args = parser.parse_args()
 
     # Ensure that the location is valid
-    if args.location.lower() not in ["summit", "usdf", "dev"]:
-        raise ValueError(f"Invalid location: {args.location}, must be either 'summit', 'usdf' or 'dev'")
+    if args.location.lower() not in ["summit", "base", "usdf", "dev"]:
+        raise ValueError(
+            f"Invalid location: {args.location}," " must be either 'summit', 'base', 'usdf' or 'dev'"
+        )
 
     # Configure logging for all modules
     log_level = getattr(logging, args.log_all.upper(), None)
@@ -165,6 +167,8 @@ def main():
     with open(config.credentials_path, "r") as file:
         credentials = file.readlines()
     for credential in credentials:
+        if not credential.strip():
+            continue
         _server, _, database, user, password = credential.split(":")
         if _server == config.consdb and database == args.database:
             password = password.strip()
