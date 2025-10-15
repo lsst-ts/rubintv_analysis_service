@@ -135,6 +135,7 @@ class BaseCommand(ABC):
     command_registry = {}
     result: dict | None = None
     response_type: str
+    request_id: str | None = None
 
     @abstractmethod
     def build_contents(self, data_center: DataCenter) -> dict:
@@ -198,8 +199,9 @@ class BaseCommand(ABC):
         """Convert the `result` into JSON."""
         if self.result is None:
             raise CommandExecutionError(f"Null result for command {self.__class__.__name__}")
-        if request_id is not None:
-            self.result["requestId"] = request_id
+        final_request_id = request_id if request_id is not None else self.request_id
+        if final_request_id is not None:
+            self.result["requestId"] = final_request_id
         return json.dumps(self.result)
 
     @classmethod
@@ -247,8 +249,11 @@ def execute_command(command_str: str, data_center: DataCenter) -> str:
             raise CommandParsingError(f"Unrecognized command '{command_dict['name']}'")
 
         parameters = command_dict.get("parameters", {})
-        if "requestId" in command_dict:
-            parameters["request_id"] = command_dict["requestId"]
+
+        request_id = command_dict.get("requestId")
+        if request_id is not None:
+            parameters["request_id"] = request_id
+
         command = BaseCommand.command_registry[command_dict["name"]](**parameters)
 
     except Exception as err:
@@ -265,10 +270,7 @@ def execute_command(command_str: str, data_center: DataCenter) -> str:
         return error_msg(CommandExecutionError(f"{err} error executing command."), traceback_string)
 
     try:
-        if "requestId" in command_dict:
-            result = command.to_json(command_dict["requestId"])
-        else:
-            result = command.to_json()
+        result = command.to_json()
     except Exception as err:
         logger.exception("Error converting command response to JSON.")
         traceback_string = traceback.format_exc()
