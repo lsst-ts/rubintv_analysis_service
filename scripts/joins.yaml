@@ -54,8 +54,8 @@ joins:
       visit1:
         - visit_id
       ccdvisit1:
-        # - visit_id
-        - exposure_id
+        - visit_id
+        # - exposure_id
 
   # visit1 and visit1_quicklook
   - type: inner
