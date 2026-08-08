@@ -81,6 +81,13 @@ next restart. The deploy branches are:
 - ``deploy-summit`` — summit
 - ``deploy-bts`` — base test stand
 
+A branch is **not** one pod. USDF runs two instances against different
+endpoints, both tracking ``deploy-slac``, so a push reaches both on their next
+restart. Anything that differs between instances — notably the web app endpoint
+path — therefore has to be set in ``RUN_ARG`` for whichever instance departs
+from the default, and a change to a default must be checked against *every*
+pod on the branch, not just the one being worked on.
+
 Mounted paths
 -------------
 
@@ -125,8 +132,18 @@ the path changes with it. To find the prefix of a running frontend:
      -o jsonpath='{range .spec.containers[*].env[*]}{.name}={.value}{"\n"}{end}' \
      | grep -i prefix
 
-Sites upgrade independently, so a worker may need ``--path`` overridden via
-``RUN_ARG`` until its frontend is upgraded.
+``--path`` defaults to the **v3** endpoint. Web app instances upgrade
+independently, so a pod still connecting to a v2 web app overrides it in
+``RUN_ARG``:
+
+.. code-block:: yaml
+
+   RUN_ARG: rubintv_worker.py -a rubintv -p 8080 -l usdf --path /ws/worker
+
+At USDF as of August 2026 the dev instance runs the v3 web app (and so takes
+the default) while prod still runs v2 (and so carries the override). Confirm
+before relying on this — check the frontend's image tag, or GET
+``<prefix>/api/subapps``, which only the v3 app serves.
 
 The message contract is unchanged between v2 and v3: opaque text frames, one
 request and one response per job. Only the path moved.
