@@ -20,6 +20,7 @@ toctree linking to topics related to using the module's APIs.
    :maxdepth: 2
 
    design
+   deployment
 
 .. _lsst.rubintv.analysis.service-contributing:
 
