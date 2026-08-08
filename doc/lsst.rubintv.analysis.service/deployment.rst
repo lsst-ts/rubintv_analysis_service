@@ -88,6 +88,50 @@ path — therefore has to be set in ``RUN_ARG`` for whichever instance departs
 from the default, and a change to a default must be checked against *every*
 pod on the branch, not just the one being worked on.
 
+Keeping the deploy branches up to date
+--------------------------------------
+
+Ordinary work goes to ``main`` through a PR as usual. A merged PR changes
+nothing at any site: the pods track deploy branches, so **a site only gets a
+change when its deploy branch does**.
+
+Once a change is reviewed and merged to ``main``, bring the deploy branches
+forward with::
+
+   scripts/update_deploy_branches.sh              # dry run: what each would take
+   scripts/update_deploy_branches.sh --push       # merge main in and push
+   scripts/update_deploy_branches.sh --push deploy-slac   # one site only
+
+Updating one site at a time is often the right call — it lets a change soak at
+USDF before it reaches the summit.
+
+Merge, don't rebase
+~~~~~~~~~~~~~~~~~~~
+
+The deploy branches are published and are pulled by running pods, so their
+history must not be rewritten: a pod that cloned mid-rebase would be sitting on
+a commit that no longer exists. The script merges for this reason, and the same
+applies to any manual update.
+
+Site-only commits
+~~~~~~~~~~~~~~~~~
+
+A deploy branch may carry commits that must never reach ``main`` — a site's
+database host, or a ``--path`` default that suits one web app version. Merging
+``main`` in preserves them; rebasing or force-pushing would not.
+
+This also means a deploy branch is **not** a staging area for changes headed to
+``main``. Anything of general value belongs in a PR against ``main``, or it
+will be lost the next time someone reconciles the branches.
+
+Stale branches
+~~~~~~~~~~~~~~
+
+``origin`` also carries ``deploy-usdf`` and ``deploy-slac-comcam``, which are
+predecessors and are **not** deployed. The script skips them deliberately.
+Check a branch is live — that some pod's ``DEPLOY_BRANCH`` names it — before
+updating it.
+
 Mounted paths
 -------------
 
