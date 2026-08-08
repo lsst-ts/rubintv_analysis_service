@@ -32,7 +32,7 @@ from lsst.rubintv.analysis.service.data import DataCenter, DataMatch
 from lsst.rubintv.analysis.service.database import ConsDbSchema
 from lsst.rubintv.analysis.service.efd import EfdClient
 from lsst.rubintv.analysis.service.utils import ServerFormatter
-from lsst.rubintv.analysis.service.worker import DEFAULT_WS_PATH, V3_WS_PATH, Worker
+from lsst.rubintv.analysis.service.worker import DEFAULT_WS_PATH, Worker
 
 default_config = os.path.join(pathlib.Path(__file__).parent.absolute(), "config.yaml")
 default_joins = os.path.join(pathlib.Path(__file__).parent.absolute(), "joins.yaml")
@@ -101,8 +101,8 @@ def main():
         default=DEFAULT_WS_PATH,
         type=str,
         help="Path of the worker websocket endpoint on the rubinTV web app. "
-        f"Defaults to '{DEFAULT_WS_PATH}' (the v2 web app); pods connecting to "
-        f"the v3 web app need '{V3_WS_PATH}'.",
+        f"Defaults to '{DEFAULT_WS_PATH}' (the v3 web app); sites still running "
+        "the v2 web app need '/ws/worker'.",
     )
     parser.add_argument(
         "-c", "--config", default=default_config, type=str, help="Location of the configuration file."

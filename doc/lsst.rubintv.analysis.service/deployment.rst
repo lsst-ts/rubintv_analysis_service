@@ -81,11 +81,6 @@ next restart. The deploy branches are:
 - ``deploy-summit`` — summit
 - ``deploy-bts`` — base test stand
 
-A branch is **not** one pod. USDF runs two instances against different
-endpoints, both tracking ``deploy-slac``, so a push to it reaches both on their
-next restart. Anything that differs between instances — notably the web app
-endpoint path — must therefore be set in ``RUN_ARG``, not defaulted in code.
-
 Mounted paths
 -------------
 
@@ -110,25 +105,15 @@ Connecting to the web app
 The worker connects to ``ws://<address>:<port><path>``, set by ``--address``,
 ``--port`` and ``--path``.
 
-**The endpoint path depends on which version of the web app a pod connects
-to**, so it is a command-line option rather than a hardcoded value:
+**The endpoint path depends on which version of the web app a site runs**, so
+it is a command-line option rather than a hardcoded value:
 
 =================  ==================================  ================================
 Web app            Worker endpoint                     Repository
 =================  ==================================  ================================
-v2 (the default)   ``/ws/worker``                      lsst-ts/rubintv
-v3                 ``/rubintv/internal/ddv/worker``    `rubintv-v3 <https://github.com/lsst-ts/rubintv-v3>`_
+v3 (current)       ``/rubintv/internal/ddv/worker``    `rubintv-v3 <https://github.com/lsst-ts/rubintv-v3>`_
+v2 (legacy)        ``/ws/worker``                      lsst-ts/rubintv
 =================  ==================================  ================================
-
-``--path`` defaults to the **v2** endpoint. This is deliberate: a single deploy
-branch is shared by more than one pod, and those pods may point at different
-web app versions, so the default has to be the one that leaves an un-migrated
-pod working. A pod connecting to a v3 web app sets ``--path`` explicitly in its
-``RUN_ARG``:
-
-.. code-block:: yaml
-
-   RUN_ARG: rubintv_worker.py -a rubintv -p 8080 -l usdf --path /rubintv/internal/ddv/worker
 
 The v3 path is built from the app's configured prefix (``SAFIR_PATH_PREFIX``,
 ``/rubintv`` at USDF) plus ``/internal/ddv/worker``. If a site's prefix differs,
@@ -140,11 +125,8 @@ the path changes with it. To find the prefix of a running frontend:
      -o jsonpath='{range .spec.containers[*].env[*]}{.name}={.value}{"\n"}{end}' \
      | grep -i prefix
 
-Web app instances upgrade independently, and **more than one worker pod can
-share a deploy branch** while pointing at different instances — USDF runs two,
-at different endpoints. A change to a deploy branch therefore reaches every pod
-tracking it, so version-specific settings belong in ``RUN_ARG`` rather than in
-the code's defaults.
+Sites upgrade independently, so a worker may need ``--path`` overridden via
+``RUN_ARG`` until its frontend is upgraded.
 
 The message contract is unchanged between v2 and v3: opaque text frames, one
 request and one response per job. Only the path moved.
