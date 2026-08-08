@@ -32,11 +32,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("lsst.rubintv.analysis.service.client")
 
-# Path of the worker endpoint on the rubinTV web app. The v3 web app serves
-# this under its own path prefix (``/rubintv/internal/ddv/worker``); the v2
-# app served it unprefixed at ``/ws/worker``. Sites upgrade independently, so
-# this is overridable from the command line rather than fixed per branch.
-DEFAULT_WS_PATH = "/rubintv/internal/ddv/worker"
+# Path of the worker endpoint on the rubinTV web app. The v2 app serves this
+# unprefixed at ``/ws/worker``; the v3 app moved it under its own path prefix,
+# to ``/rubintv/internal/ddv/worker``.
+#
+# The default is the v2 path because a single deploy branch is shared by pods
+# talking to both versions, so the default must be the one that leaves an
+# un-migrated pod working. Pods pointed at a v3 web app set ``--path``
+# explicitly in their deployment config.
+DEFAULT_WS_PATH = "/ws/worker"
+V3_WS_PATH = "/rubintv/internal/ddv/worker"
 
 
 class WorkerConnectionError(RuntimeError):
