@@ -32,6 +32,20 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("lsst.rubintv.analysis.service.client")
 
+# Path of the worker endpoint on the rubinTV web app. The v3 web app serves
+# this under its own path prefix (``/rubintv/internal/ddv/worker``); the v2
+# app served it unprefixed at ``/ws/worker``. Sites upgrade independently, so
+# this is overridable from the command line rather than fixed per branch.
+DEFAULT_WS_PATH = "/rubintv/internal/ddv/worker"
+
+
+class WorkerConnectionError(RuntimeError):
+    """The worker could not establish a usable connection to rubinTV.
+
+    Raised for failures that will not resolve by retrying, so that the
+    process can exit non-zero instead of looking like a clean shutdown.
+    """
+
 
 class Worker:
     """A worker that connects to the rubinTV server and executes commands.
@@ -42,26 +56,37 @@ class Worker:
         Address of the rubinTV web app websockets.
     _port :
         Port of the rubinTV web app websockets.
+    _path :
+        Path of the rubinTV worker websocket endpoint.
     _dataCenter :
         Data center for the worker.
     """
 
     _address: str
     _port: int
+    _path: str
     _data_center: DataCenter
+    _error: Exception | None
 
-    def __init__(self, address: str, port: int, data_center: DataCenter):
+    def __init__(self, address: str, port: int, data_center: DataCenter, path: str = DEFAULT_WS_PATH):
         self._address = address
         self._port = port
+        self._path = path if path.startswith("/") else f"/{path}"
         self._data_center = data_center
+        self._error = None
 
     @property
     def data_center(self) -> DataCenter:
         return self._data_center
 
-    def on_error(self, ws: WebSocketApp, error: str) -> None:
-        """Error received from the server."""
+    def on_error(self, ws: WebSocketApp, error: Exception) -> None:
+        """Error received from the server.
+
+        ``run_forever`` reports errors here and then returns normally, so the
+        error is recorded for ``run`` to act on once it has.
+        """
         logger.error(f"Error: {error}")
+        self._error = error
 
     def on_close(self, ws: WebSocketApp, close_status_code: str, close_msg: str) -> None:
         """Connection closed by the server."""
@@ -85,14 +110,24 @@ class Worker:
             response = execute_command(message, self.data_center)
             ws.send(response)
 
-        logger.connection(f"Connecting to rubinTV at {self._address}:{self._port}")
+        url = f"ws://{self._address}:{self._port}{self._path}"
+        logger.connection(f"Connecting to rubinTV at {url}")
 
         # Connect to the WebSocket server
+        self._error = None
         ws = WebSocketApp(
-            f"ws://{self._address}:{self._port}/ws/worker",
+            url,
             on_message=on_message,
             on_error=self.on_error,
             on_close=self.on_close,
         )
         ws.run_forever()
         ws.close()
+
+        # run_forever returns rather than raising when it cannot connect, so
+        # without this a worker that never reached the server would exit 0 and
+        # be indistinguishable from a clean shutdown. Under a Kubernetes
+        # restartPolicy that means a silent restart loop instead of a visible
+        # failure.
+        if self._error is not None:
+            raise WorkerConnectionError(f"Connection to {url} failed: {self._error}") from self._error
