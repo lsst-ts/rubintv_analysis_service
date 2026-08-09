@@ -20,6 +20,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import os
+import shutil
 import sqlite3
 import tempfile
 from unittest import TestCase
@@ -31,6 +32,7 @@ from astropy.table import Table as ApTable
 from astropy.time import Time
 from lsst.rubintv.analysis.service.data import DataCenter
 from lsst.rubintv.analysis.service.database import ConsDbSchema
+from lsst.rubintv.analysis.service.logging import cleanup_persistent_logger
 
 # Convert visit DB datatypes to sqlite3 datatypes
 datatype_transform = {
@@ -217,9 +219,20 @@ class RasTestCase(TestCase):
         with open(joins_path) as file:
             joins = yaml.safe_load(file)["joins"]
 
-        # Create the datacenter
+        # Create the datacenter. The user path is a temporary directory so the
+        # query log a test triggers is written there rather than into the
+        # working directory.
+        self.user_dir = tempfile.mkdtemp()
         self.database = ConsDbSchema(schema=schema, engine=engine, join_templates=joins)
-        self.data_center = DataCenter(schemas={"testdb": self.database}, user_path="")
+        self.data_center = DataCenter(schemas={"testdb": self.database}, user_path=self.user_dir)
+
+        # The query logger opens its file lazily, part way through whichever
+        # test first logs a query. Closing it here as well as in tearDown keeps
+        # that handle from outliving the test that opened it: --open-files
+        # compares the open files at teardown against those at setup, and its
+        # teardown hook runs before unittest's own tearDown has finished.
+        self.addCleanup(cleanup_persistent_logger)
+        cleanup_persistent_logger()
 
     def tearDown(self) -> None:
         # Clean up database connection
@@ -230,9 +243,9 @@ class RasTestCase(TestCase):
         os.remove(self.db_file.name)
 
         # Clean up any persistent loggers
-        from lsst.rubintv.analysis.service.logging import cleanup_persistent_logger
-
         cleanup_persistent_logger()
+
+        shutil.rmtree(self.user_dir, ignore_errors=True)
 
     def assertDataTableEqual(self, result: dict | ApTable, truth: ApTable):  # NOQA: N802
         """Check if two data tables are equal.
