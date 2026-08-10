@@ -28,6 +28,7 @@ from typing import Any
 import sqlalchemy
 import yaml
 from lsst.daf.butler import Butler
+from lsst.rubintv.analysis.service.commands.db import warm_cameras
 from lsst.rubintv.analysis.service.data import DataCenter, DataMatch
 from lsst.rubintv.analysis.service.database import ConsDbSchema
 from lsst.rubintv.analysis.service.efd import EfdClient
@@ -126,8 +127,9 @@ def main():
     parser.add_argument(
         "--no-warm-schemas",
         action="store_true",
-        help="Skip verifying the schemas at startup. The work then happens on the first "
-        "request for each instrument instead, which makes startup faster but that request slower.",
+        help="Skip verifying the schemas and loading the cameras at startup. The work then "
+        "happens on the first request for each instrument instead, which makes startup faster "
+        "but that request slower.",
     )
     args = parser.parse_args()
 
@@ -155,6 +157,11 @@ def main():
         "lsst.rubintv.analysis.service.worker",
         "lsst.rubintv.analysis.service.client",
         "lsst.rubintv.analysis.service.server",
+        # These report how long the startup warming takes, which is otherwise
+        # invisible: without them these modules inherit the root level set by
+        # --log-all, which hides INFO.
+        "lsst.rubintv.analysis.service.database",
+        "lsst.rubintv.analysis.service.commands.db",
     ]:
         logger = logging.getLogger(logger_name)
         logger.setLevel(worker_log_level)
@@ -193,10 +200,10 @@ def main():
             schema = yaml.safe_load(file)
             schemas[name] = ConsDbSchema(schema=schema, engine=engine, join_templates=joins)
 
-    # Verify the schemas now rather than on the first request for each
-    # instrument. The worker is not serving anyone until it connects, so this
-    # costs nobody's time, whereas the first user to select an instrument would
-    # otherwise wait for it.
+    # Do the work "load instrument" would otherwise do lazily: verify the
+    # schemas and load the camera geometry. The worker is not serving anyone
+    # until it connects, so this costs nobody's time, whereas the first user to
+    # select an instrument would otherwise wait for it.
     if not args.no_warm_schemas:
         logger.info("Verifying schemas")
         for name, database in schemas.items():
@@ -206,6 +213,9 @@ def main():
                 # A schema that cannot be verified is left to be retried on
                 # first use; it must not stop the worker from starting.
                 logger.error(f"Failed to verify schema {name}: {e}")
+
+        logger.info("Loading cameras")
+        warm_cameras()
 
     # Load the Butler (if one is available)
     logger.info("Connecting to Butlers")
