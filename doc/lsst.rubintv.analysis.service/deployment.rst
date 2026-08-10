@@ -252,9 +252,24 @@ without a deployment:
 
 .. code-block:: bash
 
-   python scripts/mock_server.py                    # terminal 1
-   python scripts/rubintv_worker.py -l dev          # terminal 2
+   python scripts/mock_server.py                                     # terminal 1
+   python scripts/rubintv_worker.py -l dev --path /ws/worker         # terminal 2
+
+``--path`` is needed because the mock server routes ``/ws/<type>`` only, while
+the worker now defaults to the v3 web app's endpoint. Without it the handshake
+is rejected with a 403.
 
 The ``dev`` location expects credentials at ``~/.lsst/postgres-credentials.txt``
-rather than the mounted secret path, and ``$SDM_SCHEMAS_DIR`` must point at an
-SDM schemas checkout.
+rather than the mounted secret path — the other locations read a secret mounted
+into the pod at ``/etc/secrets/``, which does not exist outside the cluster.
+The file is in ``.pgpass`` format and its first field has to match the ``dev``
+host in ``config.yaml`` exactly::
+
+   <consdb-host>:5432:exposurelog:<user>:<password>
+
+``$SDM_SCHEMAS_DIR`` must also point at an SDM schemas checkout.
+
+If the worker exits with ``Could not find credentials for ...`` it never opened
+a connection — the message means no line in that file matched both the host and
+the ``--database`` name (default ``exposurelog``). Check the file exists at the
+path the chosen location implies before looking at its contents.
