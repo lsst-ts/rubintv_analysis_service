@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 
 from ..command import BaseCommand
@@ -227,6 +228,38 @@ class LoadInstrumentCommand(BaseCommand):
             logger.warning(f"Available databases: {data_center.schemas.keys()}")
 
         return result
+
+
+def warm_cameras() -> None:
+    """Load the camera geometry ahead of the first request that needs it.
+
+    ``LoadInstrumentCommand`` imports ``lsst.obs.lsst`` and calls
+    ``getCamera()`` lazily, so the first "load instrument" pays for both. Both
+    are cached thereafter — inside the import machinery and inside
+    ``lsst.obs.lsst`` respectively — so doing it once up front moves several
+    seconds off whichever request happens to arrive first.
+
+    Failures are logged and ignored: this is an optimisation, and the command
+    itself will raise if the camera is genuinely unavailable.
+    """
+    try:
+        from lsst.obs.lsst import Latiss, LsstCam, LsstComCam, LsstComCamSim
+    except ImportError as e:
+        logger.warning(f"Could not import cameras to warm them: {e}")
+        return
+
+    for name, camera_class in (
+        ("lsstcam", LsstCam),
+        ("lsstcomcam", LsstComCam),
+        ("latiss", Latiss),
+        ("lsstcomcamsim", LsstComCamSim),
+    ):
+        try:
+            start = time.monotonic()
+            camera_class.getCamera()
+            logger.info(f"Loaded the {name} camera in {time.monotonic() - start:.1f}s")
+        except Exception as e:
+            logger.warning(f"Could not load the {name} camera: {e}")
 
 
 # Register the commands
