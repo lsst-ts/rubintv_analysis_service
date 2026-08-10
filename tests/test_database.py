@@ -87,3 +87,59 @@ class TestDatabase(utils.RasTestCase):
     def test_calculate_bounds(self):
         result = self.database.calculate_bounds("exposure.dec")
         self.assertTupleEqual(result, (-40, 50))
+
+    def test_columns_with_values(self):
+        """The batched check must agree with the per-column one it replaces."""
+        column_names = ["visit_id", "exp_time", "empty_column"]
+        populated = self.database.columns_with_values("visit1_quicklook", column_names)
+
+        self.assertEqual(populated, {"visit_id", "exp_time"})
+        self.assertEqual(
+            populated,
+            {name for name in column_names if self.database.has_non_null_values(f"visit1_quicklook.{name}")},
+        )
+
+    def test_columns_with_values_unknown_table(self):
+        self.assertEqual(self.database.columns_with_values("not_a_table", ["a"]), set())
+
+    def test_verified_schema_drops_empty_columns(self):
+        schema = self.database.get_verified_schema()
+
+        columns = {
+            f"{table['name']}.{column['name']}" for table in schema["tables"] for column in table["columns"]
+        }
+        self.assertIn("visit1_quicklook.visit_id", columns)
+        self.assertNotIn("visit1_quicklook.empty_column", columns)
+
+        # The schema the instance was built with must not be modified, since
+        # it is shared with whoever constructed it.
+        source_columns = {
+            column["name"]
+            for table in self.database.schema["tables"]
+            if table["name"] == "visit1_quicklook"
+            for column in table["columns"]
+        }
+        self.assertIn("empty_column", source_columns)
+
+    def test_verified_schema_is_cached(self):
+        first = self.database.get_verified_schema()
+        self.assertIs(self.database.get_verified_schema(), first)
+
+        # An explicit refresh recalculates, and still filters correctly.
+        refreshed = self.database.refresh_verified_schema()
+        self.assertIsNot(refreshed, first)
+        self.assertEqual(
+            {t["name"] for t in refreshed["tables"]},
+            {t["name"] for t in first["tables"]},
+        )
+
+    def test_verified_schema_ttl_expires(self):
+        database = lras.database.ConsDbSchema(
+            engine=self.database.engine,
+            schema=self.database.schema,
+            join_templates=[],
+            verified_schema_ttl=0,
+        )
+        first = database.get_verified_schema()
+        # With no TTL every call recalculates rather than returning the cache.
+        self.assertIsNot(database.get_verified_schema(), first)
