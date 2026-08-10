@@ -131,6 +131,12 @@ def main():
         help="The name of the database to connect to."
         "It will likely never need to be changed, but including it as an option just in case.",
     )
+    parser.add_argument(
+        "--no-warm-schemas",
+        action="store_true",
+        help="Skip verifying the schemas at startup. The work then happens on the first "
+        "request for each instrument instead, which makes startup faster but that request slower.",
+    )
     args = parser.parse_args()
 
     # Ensure that the location is valid
@@ -194,6 +200,20 @@ def main():
         with open(full_path, "r") as file:
             schema = yaml.safe_load(file)
             schemas[name] = ConsDbSchema(schema=schema, engine=engine, join_templates=joins)
+
+    # Verify the schemas now rather than on the first request for each
+    # instrument. The worker is not serving anyone until it connects, so this
+    # costs nobody's time, whereas the first user to select an instrument would
+    # otherwise wait for it.
+    if not args.no_warm_schemas:
+        logger.info("Verifying schemas")
+        for name, database in schemas.items():
+            try:
+                database.get_verified_schema()
+            except Exception as e:
+                # A schema that cannot be verified is left to be retried on
+                # first use; it must not stop the worker from starting.
+                logger.error(f"Failed to verify schema {name}: {e}")
 
     # Load the Butler (if one is available)
     logger.info("Connecting to Butlers")
