@@ -222,8 +222,10 @@ def main():
                 # first use; it must not stop the worker from starting.
                 logger.error(f"Failed to verify schema {name}: {e}")
 
+        # The schema names are the source of truth for which instruments this
+        # worker serves: "cdb_lsstcam" is the lsstcam instrument.
         logger.info("Loading cameras")
-        warm_cameras()
+        warm_cameras(name.removeprefix("cdb_") for name in schemas)
 
     # Load the Butler (if one is available)
     logger.info("Connecting to Butlers")

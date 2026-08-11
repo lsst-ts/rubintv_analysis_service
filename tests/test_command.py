@@ -70,6 +70,60 @@ class TestLoadInstrumentCommand(TestCommand):
         self.assertListEqual(column_names, list(data.keys()))
 
 
+class TestGetCamera(utils.RasTestCase):
+    """The instrument -> camera class lookup.
+
+    Instruments are named by the schemas in config.yaml, so resolving the class
+    from the name means adding an instrument does not also mean editing code.
+    """
+
+    def make_obs_lsst(self):
+        """A stand-in for lsst.obs.lsst holding the real class names."""
+        module = MagicMock()
+        names = ["LsstCam", "LsstComCam", "LsstComCamSim", "Latiss"]
+        cameras = {}
+        for name in names:
+            camera_class = MagicMock()
+            camera_class.getCamera.return_value = f"<{name}>"
+            cameras[name] = camera_class
+            setattr(module, name, camera_class)
+        module.__dir__ = lambda self=None: names
+        return module, cameras
+
+    def test_resolves_configured_instruments(self):
+        module, _ = self.make_obs_lsst()
+        obs = MagicMock()
+        obs.lsst = module
+        with patch.dict("sys.modules", {"lsst.obs": obs, "lsst.obs.lsst": module}):
+            for instrument, expected in [
+                ("lsstcam", "LsstCam"),
+                ("lsstcomcam", "LsstComCam"),
+                ("lsstcomcamsim", "LsstComCamSim"),
+                ("latiss", "Latiss"),
+            ]:
+                self.assertEqual(lras.commands.db.get_camera(instrument), f"<{expected}>")
+
+    def test_instrument_without_camera(self):
+        self.assertIsNone(lras.commands.db.get_camera("testdb"))
+
+    def test_unknown_instrument_raises(self):
+        module, _ = self.make_obs_lsst()
+        obs = MagicMock()
+        obs.lsst = module
+        with patch.dict("sys.modules", {"lsst.obs": obs, "lsst.obs.lsst": module}):
+            with self.assertRaises(ValueError):
+                lras.commands.db.get_camera("not_an_instrument")
+
+    def test_warm_cameras_survives_failures(self):
+        """A camera that cannot be loaded must not stop the others warming."""
+        module, cameras = self.make_obs_lsst()
+        obs = MagicMock()
+        obs.lsst = module
+        with patch.dict("sys.modules", {"lsst.obs": obs, "lsst.obs.lsst": module}):
+            lras.commands.db.warm_cameras(["lsstcam", "not_an_instrument", "testdb"])
+        cameras["LsstCam"].getCamera.assert_called_once()
+
+
 class TestLoadColumnsWithAggregatorCommand(TestCommand):
     def setUpTest(self):
         """
