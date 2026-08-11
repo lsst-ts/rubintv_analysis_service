@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 import sqlalchemy
 
@@ -29,6 +30,12 @@ from .data import DatabaseSelectionId, DataId
 from .query import Query
 
 logger = logging.getLogger("lsst.rubintv.analysis.service.database")
+
+# How long a verified schema is reused before being recalculated. Which
+# columns are entirely null changes as the schema evolves rather than per
+# request, so this only has to be short enough that a column gaining its first
+# data becomes visible without a restart.
+VERIFIED_SCHEMA_TTL = 3600.0
 
 
 # Exposure tables currently in the schema
@@ -277,10 +284,22 @@ class ConsDbSchema:
     tables: dict[str, sqlalchemy.Table]
     joins: JoinBuilder
 
-    def __init__(self, engine: sqlalchemy.engine.Engine, schema: dict, join_templates: list):
+    def __init__(
+        self,
+        engine: sqlalchemy.engine.Engine,
+        schema: dict,
+        join_templates: list,
+        verified_schema_ttl: float = VERIFIED_SCHEMA_TTL,
+    ):
         self.engine = engine
         self.schema = schema
         self.metadata = sqlalchemy.MetaData()
+
+        # Cache for get_verified_schema, which is expensive enough that
+        # recomputing it per request dominates "load instrument".
+        self._verified_schema: dict | None = None
+        self._verified_schema_time: float = 0.0
+        self._verified_schema_ttl = verified_schema_ttl
 
         self.tables = {}
         schema_tables = self.schema["tables"].copy()
@@ -564,6 +583,44 @@ class ConsDbSchema:
                 raise ValueError(f"Could not calculate the max of column {column}")
         return col_min, col_max
 
+    def columns_with_values(self, table_name: str, column_names: list[str]) -> set[str]:
+        """Find which of a table's columns contain at least one non-null value.
+
+        This answers the same question as `has_non_null_values` but for a whole
+        table at once: ``count`` ignores nulls, so a count of zero means the
+        column is entirely null. One query per table rather than one per column
+        roughly halves the time to verify a schema.
+
+        Parameters
+        ----------
+        table_name :
+            The name of the table to check.
+        column_names :
+            The columns of that table to check.
+
+        Returns
+        -------
+        set[str]
+            The names of the columns that hold at least one non-null value. On
+            error the columns are all reported as populated, so that a failure
+            here hides nothing from the user.
+        """
+        if table_name not in self.tables:
+            logger.warning(f"Table '{table_name}' not found in database schema.")
+            return set()
+
+        table = self.tables[table_name]
+        try:
+            counts = [sqlalchemy.func.count(table.columns[name]).label(name) for name in column_names]
+            with self.engine.connect() as connection:
+                row = connection.execute(sqlalchemy.select(*counts)).fetchone()
+            if row is None:
+                return set()
+            return {name for name, count in zip(column_names, row) if count}
+        except Exception as e:
+            logger.error(f"Error checking non-null values for table '{table_name}': {e}")
+            return set(column_names)
+
     def has_non_null_values(self, column: str) -> bool:
         """Check if a column contains any non-null values.
 
@@ -599,35 +656,48 @@ class ConsDbSchema:
             logger.error(f"Error checking non-null values for column '{column}': {e}")
             return False
 
-    def get_verified_schema(self):
-        all_columns = [
-            f"{table['name']}.{column['name']}"
-            for table in self.schema.get("tables", [])
-            for column in table.get("columns", [])
-        ]
-        filtered_table_columns = [column for column in all_columns if self.has_non_null_values(column)]
+    def get_verified_schema(self) -> dict:
+        """The schema with entirely empty columns removed.
 
-        if filtered_table_columns is None:
-            return self.schema  # Return full schema if no filtering is needed
+        The result is cached: calculating it queries every table, which is slow
+        enough to dominate the "load instrument" command, and which columns
+        hold data changes as the schema evolves rather than between requests.
+        The cache expires after ``verified_schema_ttl`` seconds so a column
+        that gains its first data appears without restarting the worker.
+        """
+        age = time.monotonic() - self._verified_schema_time
+        if self._verified_schema is not None and age < self._verified_schema_ttl:
+            return self._verified_schema
 
+        start = time.monotonic()
+        self._verified_schema = self._calculate_verified_schema()
+        self._verified_schema_time = time.monotonic()
+        logger.info(
+            f"Verified the {self.schema['name']} schema in " f"{self._verified_schema_time - start:.1f}s"
+        )
+        return self._verified_schema
+
+    def refresh_verified_schema(self) -> dict:
+        """Recalculate the verified schema, ignoring any cached result."""
+        self._verified_schema = None
+        return self.get_verified_schema()
+
+    def _calculate_verified_schema(self) -> dict:
+        """Query the database to find which columns hold data."""
         filtered_schema = self.schema.copy()
         filtered_schema["tables"] = []
 
-        # Process tables dynamically
         for table in self.schema.get("tables", []):
-            filtered_columns = [
-                column
-                for column in table.get("columns", [])
-                if f"{table['name']}.{column['name']}" in filtered_table_columns
-            ]
-            logger.info(f"Filtered columns: {filtered_columns}")
+            column_names = [column["name"] for column in table.get("columns", [])]
+            populated = self.columns_with_values(table["name"], column_names)
+            filtered_columns = [column for column in table.get("columns", []) if column["name"] in populated]
+
             if filtered_columns:
                 # Preserve all table metadata dynamically
                 filtered_table = {key: value for key, value in table.items() if key != "columns"}
                 filtered_table["columns"] = filtered_columns
                 filtered_schema["tables"].append(filtered_table)
-
-            if not filtered_columns:
+            else:
                 logger.warning(f"All columns in {self.schema['name']}:{table['name']} are empty.")
 
         return filtered_schema
