@@ -32,7 +32,7 @@ from lsst.rubintv.analysis.service.data import DataCenter, DataMatch
 from lsst.rubintv.analysis.service.database import ConsDbSchema
 from lsst.rubintv.analysis.service.efd import EfdClient
 from lsst.rubintv.analysis.service.utils import ServerFormatter
-from lsst.rubintv.analysis.service.worker import Worker
+from lsst.rubintv.analysis.service.worker import DEFAULT_WS_PATH, Worker
 
 default_config = os.path.join(pathlib.Path(__file__).parent.absolute(), "config.yaml")
 default_joins = os.path.join(pathlib.Path(__file__).parent.absolute(), "joins.yaml")
@@ -95,6 +95,14 @@ def main():
     )
     parser.add_argument(
         "-p", "--port", default=8080, type=int, help="Port of the rubinTV web app websockets."
+    )
+    parser.add_argument(
+        "--path",
+        default=DEFAULT_WS_PATH,
+        type=str,
+        help="Path of the worker websocket endpoint on the rubinTV web app. "
+        f"Defaults to '{DEFAULT_WS_PATH}' (the v3 web app); sites still running "
+        "the v2 web app need '/ws/worker'.",
     )
     parser.add_argument(
         "-c", "--config", default=default_config, type=str, help="Location of the configuration file."
@@ -211,7 +219,7 @@ def main():
 
     # Run the client and connect to rubinTV via websockets
     logger.info("Initializing worker")
-    worker = Worker(args.address, args.port, data_center)
+    worker = Worker(args.address, args.port, data_center, path=args.path)
     worker.run()
 
 
