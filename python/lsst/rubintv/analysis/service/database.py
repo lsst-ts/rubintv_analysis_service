@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 
 import sqlalchemy
@@ -300,6 +301,7 @@ class ConsDbSchema:
         self._verified_schema: dict | None = None
         self._verified_schema_time: float = 0.0
         self._verified_schema_ttl = verified_schema_ttl
+        self._stop_refresh = threading.Event()
 
         self.tables = {}
         schema_tables = self.schema["tables"].copy()
@@ -678,9 +680,62 @@ class ConsDbSchema:
         return self._verified_schema
 
     def refresh_verified_schema(self) -> dict:
-        """Recalculate the verified schema, ignoring any cached result."""
-        self._verified_schema = None
-        return self.get_verified_schema()
+        """Recalculate the verified schema, ignoring any cached result.
+
+        The new schema is built before it replaces the old one, so a request
+        arriving during the recalculation is served the previous result rather
+        than waiting for this one or seeing a half-built schema.
+        """
+        schema = self._calculate_verified_schema()
+        self._verified_schema = schema
+        self._verified_schema_time = time.monotonic()
+        return schema
+
+    def start_background_refresh(self, interval: float | None = None) -> threading.Thread:
+        """Recalculate the verified schema periodically on a daemon thread.
+
+        Without this the cache expires lazily: the first request after the TTS
+        lapses pays the whole recalculation, so roughly once an interval one
+        user waits several seconds. Refreshing ahead of that keeps every
+        request served from cache.
+
+        The thread is a daemon so it never holds up interpreter shutdown, and
+        it swallows its errors: a refresh that fails leaves the previous schema
+        in place, which is the same outcome as not having refreshed at all.
+
+        Parameters
+        ----------
+        interval :
+            Seconds between refreshes. Defaults to the instance's TTL.
+
+        Returns
+        -------
+        thread :
+            The started thread, so a caller can keep a handle on it.
+        """
+        if interval is None:
+            interval = self._verified_schema_ttl
+
+        def refresh_periodically() -> None:
+            # wait() rather than sleep() so a future shutdown path can stop the
+            # thread promptly instead of waiting out the whole interval.
+            while not self._stop_refresh.wait(interval):
+                try:
+                    self.refresh_verified_schema()
+                except Exception as e:
+                    logger.error(f"Failed to refresh the {self.schema['name']} schema: {e}")
+
+        thread = threading.Thread(
+            target=refresh_periodically,
+            name=f"refresh-{self.schema['name']}",
+            daemon=True,
+        )
+        thread.start()
+        return thread
+
+    def stop_background_refresh(self) -> None:
+        """Ask the background refresh thread to finish."""
+        self._stop_refresh.set()
 
     def _calculate_verified_schema(self) -> dict:
         """Query the database to find which columns hold data."""
