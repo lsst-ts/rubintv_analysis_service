@@ -139,6 +139,12 @@ def main():
         "happens on the first request for each instrument instead, which makes startup faster "
         "but that request slower.",
     )
+    parser.add_argument(
+        "--no-refresh-schemas",
+        action="store_true",
+        help="Do not refresh the schemas in the background. They are then recalculated by "
+        "whichever request first finds the cache expired, which makes that request slow.",
+    )
     args = parser.parse_args()
 
     # Ensure that the location is valid
@@ -226,6 +232,14 @@ def main():
         # worker serves: "cdb_lsstcam" is the lsstcam instrument.
         logger.info("Loading cameras")
         warm_cameras(name.removeprefix("cdb_") for name in schemas)
+
+        # Keep the schemas fresh in the background. Without this the cache
+        # expires lazily and whichever request arrives first after it lapses
+        # pays the whole recalculation.
+        if not args.no_refresh_schemas:
+            logger.info("Starting the schema refresh threads")
+            for database in schemas.values():
+                database.start_background_refresh()
 
     # Load the Butler (if one is available)
     logger.info("Connecting to Butlers")

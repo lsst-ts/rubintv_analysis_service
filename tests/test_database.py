@@ -19,6 +19,9 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import threading
+import time
+
 import astropy.table
 import lsst.rubintv.analysis.service as lras
 import utils
@@ -132,6 +135,68 @@ class TestDatabase(utils.RasTestCase):
             {t["name"] for t in refreshed["tables"]},
             {t["name"] for t in first["tables"]},
         )
+
+    def test_refresh_never_exposes_a_missing_schema(self):
+        """A request during a refresh must see the old schema, not None.
+
+        The refresh runs on a background thread while requests are served from
+        the main one, so building the new schema before swapping it in is what
+        keeps a concurrent reader from recalculating it itself.
+        """
+        first = self.database.get_verified_schema()
+        observed = []
+
+        def read_repeatedly():
+            for _ in range(50):
+                observed.append(self.database.get_verified_schema())
+                time.sleep(0.001)
+
+        original = self.database._calculate_verified_schema
+
+        def slow_calculate():
+            time.sleep(0.05)
+            return original()
+
+        self.database._calculate_verified_schema = slow_calculate
+        reader = threading.Thread(target=read_repeatedly)
+        reader.start()
+        self.database.refresh_verified_schema()
+        reader.join()
+
+        self.assertTrue(all(schema is not None for schema in observed))
+        self.assertTrue(all(len(schema["tables"]) == len(first["tables"]) for schema in observed))
+
+    def test_background_refresh(self):
+        first = self.database.get_verified_schema()
+        thread = self.database.start_background_refresh(interval=0.05)
+        self.addCleanup(self.database.stop_background_refresh)
+
+        self.assertTrue(thread.daemon)
+        for _ in range(100):
+            if self.database.get_verified_schema() is not first:
+                break
+            time.sleep(0.01)
+        else:
+            self.fail("the background thread did not refresh the schema")
+
+        self.database.stop_background_refresh()
+        thread.join(timeout=2)
+        self.assertFalse(thread.is_alive())
+
+    def test_background_refresh_survives_failure(self):
+        """A refresh that raises leaves the previous schema in place."""
+        good = self.database.get_verified_schema()
+
+        def fail():
+            raise RuntimeError("simulated failure")
+
+        self.database._calculate_verified_schema = fail
+        thread = self.database.start_background_refresh(interval=0.02)
+        self.addCleanup(self.database.stop_background_refresh)
+
+        time.sleep(0.1)
+        self.assertIs(self.database.get_verified_schema(), good)
+        self.assertTrue(thread.is_alive())
 
     def test_verified_schema_ttl_expires(self):
         database = lras.database.ConsDbSchema(
