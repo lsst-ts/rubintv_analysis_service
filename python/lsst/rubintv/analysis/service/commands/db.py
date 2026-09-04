@@ -22,6 +22,8 @@
 from __future__ import annotations
 
 import logging
+import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from ..command import BaseCommand
@@ -30,6 +32,14 @@ from ..database import exposure_tables, visit1_tables
 from ..query import EqualityQuery, ParentQuery, Query
 
 logger = logging.getLogger("lsst.rubintv.analysis.service.commands.db")
+
+# Instruments that have no camera geometry to load.
+INSTRUMENTS_WITHOUT_CAMERAS = {"testdb"}
+
+# Instruments whose camera class in lsst.obs.lsst is not simply their name in
+# a different case. Everything else resolves without an entry here, so adding
+# an instrument usually means only adding its schema to config.yaml.
+CAMERA_NAME_OVERRIDES: dict[str, str] = {}
 
 
 @dataclass(kw_only=True)
@@ -181,23 +191,9 @@ class LoadInstrumentCommand(BaseCommand):
 
     def build_contents(self, data_center: DataCenter) -> dict:
         from lsst.afw.cameraGeom import FOCAL_PLANE
-        from lsst.obs.lsst import Latiss, LsstCam, LsstComCam, LsstComCamSim
 
         instrument = self.instrument.lower()
-
-        match instrument:
-            case "lsstcam":
-                camera = LsstCam.getCamera()
-            case "lsstcomcam":
-                camera = LsstComCam.getCamera()
-            case "latiss":
-                camera = Latiss.getCamera()
-            case "lsstcomcamsim":
-                camera = LsstComCamSim.getCamera()
-            case "testdb":
-                camera = None
-            case _:
-                raise ValueError(f"Unsupported instrument: {instrument}")
+        camera = get_camera(instrument)
 
         detectors = []
         if camera is not None:
@@ -227,6 +223,75 @@ class LoadInstrumentCommand(BaseCommand):
             logger.warning(f"Available databases: {data_center.schemas.keys()}")
 
         return result
+
+
+def get_camera(instrument: str):
+    """Load the camera geometry for an instrument.
+
+    The instrument names come from the schemas the worker is configured with
+    (``cdb_lsstcam`` gives ``lsstcam``), so this maps a name to the class in
+    ``lsst.obs.lsst`` that describes it. Only instruments whose name differs
+    from its class name by more than capitalisation need an entry in
+    `CAMERA_NAME_OVERRIDES`; anything else is resolved by matching the class
+    name case-insensitively, so a new instrument needs adding to the schemas in
+    ``config.yaml`` and nowhere else.
+
+    Parameters
+    ----------
+    instrument :
+        The lowercased name of the instrument.
+
+    Returns
+    -------
+    camera :
+        The camera, or None for instruments that have no geometry (the test
+        database).
+
+    Raises
+    ------
+    ValueError
+        If the instrument has no camera in ``lsst.obs.lsst``.
+    """
+    if instrument in INSTRUMENTS_WITHOUT_CAMERAS:
+        return None
+
+    from lsst.obs import lsst as obs_lsst
+
+    class_name = CAMERA_NAME_OVERRIDES.get(instrument, instrument)
+    for attribute in dir(obs_lsst):
+        if attribute.lower() == class_name.lower():
+            camera_class = getattr(obs_lsst, attribute)
+            if hasattr(camera_class, "getCamera"):
+                return camera_class.getCamera()
+
+    raise ValueError(f"Unsupported instrument: {instrument}")
+
+
+def warm_cameras(instruments: Iterable[str]) -> None:
+    """Load the camera geometry ahead of the first request that needs it.
+
+    ``LoadInstrumentCommand`` imports ``lsst.obs.lsst`` and calls
+    ``getCamera()`` lazily, so the first "load instrument" pays for both. Both
+    are cached thereafter — inside the import machinery and inside
+    ``lsst.obs.lsst`` respectively — so doing it once up front moves several
+    seconds off whichever request happens to arrive first.
+
+    Failures are logged and ignored: this is an optimisation, and the command
+    itself raises if the camera is genuinely needed and unavailable.
+
+    Parameters
+    ----------
+    instruments :
+        The instrument names to load, typically derived from the configured
+        schema names.
+    """
+    for instrument in instruments:
+        try:
+            start = time.monotonic()
+            if get_camera(instrument) is not None:
+                logger.info(f"Loaded the {instrument} camera in {time.monotonic() - start:.1f}s")
+        except Exception as e:
+            logger.warning(f"Could not load the {instrument} camera: {e}")
 
 
 # Register the commands
