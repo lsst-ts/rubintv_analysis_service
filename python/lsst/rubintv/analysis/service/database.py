@@ -68,6 +68,13 @@ flex_tables = [
 ]
 
 
+# Aggregate functions a client may ask for. `sqlalchemy.func` generates any
+# name on demand rather than raising for an unknown one, so an aggregator has
+# to be checked against a list like this: without it a typo reaches the
+# database as an unknown-function error instead of a clear rejection.
+VALID_AGGREGATORS = frozenset({"count", "sum", "avg", "min", "max"})
+
+
 class UnrecognizedTableError(Exception):
     """An error that occurs when a table name does not appear in the schema"""
 
@@ -530,6 +537,12 @@ class ConsDbSchema:
             data_id_select = sqlalchemy.tuple_(day_obs_column, seq_num_column).in_(data_ids)
             query_model = sqlalchemy.and_(query_model, data_id_select)
 
+        if aggregator is not None and aggregator.lower() not in VALID_AGGREGATORS:
+            raise ValueError(
+                f"Invalid aggregator '{aggregator}' provided. "
+                f"Valid aggregators are {sorted(VALID_AGGREGATORS)}."
+            )
+
         counting = aggregator is not None and aggregator.lower() == "count"
 
         if counting:
@@ -544,12 +557,7 @@ class ConsDbSchema:
                 sqlalchemy.select(sqlalchemy.func.count()).select_from(select_from).where(query_model)
             )
         elif aggregator is not None:
-            # Validate and apply the aggregator
-            try:
-                aggregate_func = getattr(sqlalchemy.func, aggregator.lower())
-            except AttributeError:
-                raise ValueError(f"Invalid aggregator '{aggregator}' provided.")
-
+            aggregate_func = getattr(sqlalchemy.func, aggregator.lower())
             query_model = (
                 sqlalchemy.select(*[aggregate_func(column) for column in table_columns])
                 .select_from(select_from)

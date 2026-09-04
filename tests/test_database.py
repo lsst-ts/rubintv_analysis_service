@@ -158,6 +158,40 @@ class TestDatabase(utils.RasTestCase):
         self.assertIn("sum(exposure.ra)", sum_sql)
         self.assertEqual(sums, {"exposure.ra": 370.0, "exposure.dec": 20.0})
 
+    def test_invalid_aggregator_is_rejected(self):
+        """An unknown aggregator raises rather than reaching the database.
+
+        `sqlalchemy.func` synthesises any name it is asked for instead of
+        raising, so an unchecked aggregator becomes an unknown-function error
+        from the database rather than a clear rejection.
+        """
+        columns = ["exposure.ra", "exposure.dec"]
+
+        with self.assertRaises(ValueError) as context:
+            self.database.query(columns, aggregator="bogus")
+        self.assertIn("bogus", str(context.exception))
+
+        # The rejection happens before the database is touched.
+        statements = []
+        original = lras.database.ConsDbSchema.fetch_data
+
+        def spy(db_self, query_model):
+            statements.append(str(query_model))
+            return original(db_self, query_model)
+
+        lras.database.ConsDbSchema.fetch_data = spy
+        try:
+            with self.assertRaises(ValueError):
+                self.database.query(columns, aggregator="drop")
+            self.assertEqual(statements, [])
+
+            # Every supported aggregator is still accepted, in any case.
+            for aggregator in ("count", "SUM", "avg", "min", "max"):
+                self.database.query(columns, aggregator=aggregator)
+            self.assertEqual(len(statements), 5)
+        finally:
+            lras.database.ConsDbSchema.fetch_data = original
+
     def test_calculate_bounds(self):
         result = self.database.calculate_bounds("exposure.dec")
         self.assertTupleEqual(result, (-40, 50))
