@@ -188,7 +188,14 @@ class JoinBuilder:
         result :
             The join between all of the tables.
         """
-        tables = list(table_names)
+        # Sort the tables so that the same set of tables always produces the
+        # same SQL. The anchor table (the one the `FROM` clause starts from)
+        # is `tables[0]`, so an arbitrary set ordering would otherwise emit a
+        # different, though equivalent, statement for identical requests.
+        # Most connected first keeps the anchor on a hub table such as
+        # `exposure` or `visit1`, which keeps the join paths short, and the
+        # name breaks ties so the order is fully determined.
+        tables = sorted(table_names, key=lambda name: (-len(self.join_graph[name]), name))
         select_from = self.tables[tables[0]]
         # Use the first table as the starting point
         joined_tables = set([tables[0]])
@@ -523,7 +530,20 @@ class ConsDbSchema:
             data_id_select = sqlalchemy.tuple_(day_obs_column, seq_num_column).in_(data_ids)
             query_model = sqlalchemy.and_(query_model, data_id_select)
 
-        if aggregator is not None:
+        counting = aggregator is not None and aggregator.lower() == "count"
+
+        if counting:
+            # Every selected column is already forced `IS NOT NULL` above, so
+            # no surviving row has a null in any of them and `count(column)`
+            # is the same number for every column. The GUI uses this count to
+            # ask the user whether to load the full set, so it only needs that
+            # one number: select a single `count(*)`, which the database can
+            # satisfy without reading each column's values, and fan the result
+            # back out to the per-column keys the client expects.
+            query_model = (
+                sqlalchemy.select(sqlalchemy.func.count()).select_from(select_from).where(query_model)
+            )
+        elif aggregator is not None:
             # Validate and apply the aggregator
             try:
                 aggregate_func = getattr(sqlalchemy.func, aggregator.lower())
@@ -543,6 +563,11 @@ class ConsDbSchema:
         result = self.fetch_data(query_model)
 
         # Adjust result structure for aggregator
+        if counting:
+            # One `count(*)` stands in for the identical per-column counts.
+            count = next(iter(result.values()))[0]
+            return {column.key: count for column in table_columns}
+
         if aggregator is not None:
             # Flatten result for single aggregated value
             values = iter(result.values())
