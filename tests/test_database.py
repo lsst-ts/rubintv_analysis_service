@@ -19,6 +19,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import itertools
 import threading
 import time
 
@@ -86,6 +87,110 @@ class TestDatabase(utils.RasTestCase):
         data = self.database.query(columns=["exposure.ra", "exposure.dec", "visit1_quicklook.visit_id"])
 
         self.assertDataTableEqual(data, truth)
+
+    def test_join_anchors_on_the_most_connected_table(self):
+        """The `FROM` clause must start from a deterministic hub table.
+
+        `build_join` anchors on its first table, and it receives a `set`, so
+        without an explicit sort the anchor depends on set iteration order and
+        identical requests can emit different (though equivalent) SQL. Sorting
+        most-connected-first also keeps the anchor on a hub table, which keeps
+        the join paths short.
+        """
+        builder = self.database.joins
+        # `{"exposure", "visit1"}` iterates visit1-first, so an unsorted
+        # builder anchors on visit1 and emits the visit1-leading join seen in
+        # production logs. Sorting must anchor on the exposure hub instead.
+        tables = {"exposure", "visit1"}
+
+        # Feed the builder every permutation. A set of the same strings
+        # iterates consistently within one process, so permuting the input
+        # alone would not exercise the ordering; assert directly that the
+        # anchor is the most connected table however the set was built.
+        degree = {name: len(builder.join_graph[name]) for name in tables}
+        expected = min(tables, key=lambda name: (-degree[name], name))
+
+        joins = set()
+        for order in itertools.permutations(tables):
+            join = builder.build_join(set(order))
+            joins.add(str(join))
+            # The anchor is the leftmost table in the rendered `FROM` clause.
+            self.assertTrue(
+                str(join).startswith(expected),
+                f"Expected anchor {expected}, got {str(join)[:60]!r}",
+            )
+
+        self.assertEqual(len(joins), 1, f"Join order leaked into the SQL: {joins}")
+        sql = joins.pop()
+        for table in tables:
+            self.assertIn(table, sql)
+
+    def test_count_uses_a_single_count_star(self):
+        """Counting emits one `count(*)`, not one `count` per column.
+
+        Every selected column is already forced `IS NOT NULL`, so the
+        per-column counts are necessarily identical and the extra aggregates
+        are wasted work. The per-column response shape is part of the client
+        contract, so it must survive the change.
+        """
+        columns = ["exposure.ra", "exposure.dec"]
+        statements = []
+        original = lras.database.ConsDbSchema.fetch_data
+
+        def spy(db_self, query_model):
+            statements.append(str(query_model))
+            return original(db_self, query_model)
+
+        lras.database.ConsDbSchema.fetch_data = spy
+        try:
+            counts = self.database.query(columns, aggregator="count")
+            sums = self.database.query(columns, aggregator="sum")
+        finally:
+            lras.database.ConsDbSchema.fetch_data = original
+
+        count_sql, sum_sql = statements
+        self.assertIn("count(*)", count_sql)
+        self.assertNotIn("count(exposure.ra)", count_sql)
+        # The client still receives one entry per requested column.
+        self.assertEqual(counts, {"exposure.ra": 7, "exposure.dec": 7})
+
+        # Other aggregators keep their per-column aggregates.
+        self.assertIn("sum(exposure.ra)", sum_sql)
+        self.assertEqual(sums, {"exposure.ra": 370.0, "exposure.dec": 20.0})
+
+    def test_invalid_aggregator_is_rejected(self):
+        """An unknown aggregator raises rather than reaching the database.
+
+        `sqlalchemy.func` synthesises any name it is asked for instead of
+        raising, so an unchecked aggregator becomes an unknown-function error
+        from the database rather than a clear rejection.
+        """
+        columns = ["exposure.ra", "exposure.dec"]
+
+        with self.assertRaises(ValueError) as context:
+            self.database.query(columns, aggregator="bogus")
+        self.assertIn("bogus", str(context.exception))
+
+        # The rejection happens before the database is touched.
+        statements = []
+        original = lras.database.ConsDbSchema.fetch_data
+
+        def spy(db_self, query_model):
+            statements.append(str(query_model))
+            return original(db_self, query_model)
+
+        lras.database.ConsDbSchema.fetch_data = spy
+        try:
+            with self.assertRaises(ValueError):
+                self.database.query(columns, aggregator="drop")
+            self.assertEqual(statements, [])
+
+            # Every supported aggregator is still accepted, in any case.
+            for aggregator in ("count", "SUM", "avg", "min", "max"):
+                self.database.query(columns, aggregator=aggregator)
+            self.assertEqual(len(statements), 5)
+        finally:
+            lras.database.ConsDbSchema.fetch_data = original
 
     def test_calculate_bounds(self):
         result = self.database.calculate_bounds("exposure.dec")
