@@ -492,6 +492,7 @@ class ConsDbSchema:
         query: Query | None = None,
         data_ids: list[tuple[int, int]] | None = None,
         aggregator: str | None = None,
+        group_by: list[str] | None = None,
     ) -> dict[str, list] | dict[str, int]:
         """
         Query a table and return the results.
@@ -507,17 +508,32 @@ class ConsDbSchema:
             The data IDs to query, in the format ``(day_obs, seq_num)``.
         aggregator : str | None
             The SQL aggregation function to apply (e.g., 'sum', 'avg').
+        group_by : list[str] | None
+            ``table.column`` names to group an aggregated query by, giving
+            one aggregate per distinct combination of their values rather
+            than one for the whole selection. Requires ``aggregator``.
 
         Returns
         -------
         result : dict[str, list] | dict[str, int]
             A dictionary of columns as keys and lists of values or aggregated
-            results as values.
+            results as values. With ``group_by`` the result is columnar again:
+            the group columns and the aggregated columns, one entry per group,
+            ordered by the group columns.
         """
+        if group_by and aggregator is None:
+            raise ValueError("'group_by' requires an 'aggregator'.")
+
         # Get the models for the columns
         table_columns, table_names, data_id_columns = self.get_column_models(columns, aggregator is not None)
         if data_id_columns:
             day_obs_column, seq_num_column = data_id_columns
+
+        group_columns: list[sqlalchemy.Column] = []
+        for name in group_by or []:
+            table_name, _ = name.split(".")
+            table_names.add(table_name)
+            group_columns.append(self.get_column(name).label(name))
 
         logger.info(f"Table names: {table_names}")
 
@@ -545,7 +561,22 @@ class ConsDbSchema:
 
         counting = aggregator is not None and aggregator.lower() == "count"
 
-        if counting:
+        if group_columns:
+            # One aggregate per group. `count(*)` for the same reason as the
+            # ungrouped count below; other aggregators aggregate each column.
+            if counting:
+                aggregates = [sqlalchemy.func.count().label("count")]
+            else:
+                aggregate_func = getattr(sqlalchemy.func, aggregator.lower())
+                aggregates = [aggregate_func(column).label(column.key) for column in table_columns]
+            query_model = (
+                sqlalchemy.select(*group_columns, *aggregates)
+                .select_from(select_from)
+                .where(query_model)
+                .group_by(*group_columns)
+                .order_by(*group_columns)
+            )
+        elif counting:
             # Every selected column is already forced `IS NOT NULL` above, so
             # no surviving row has a null in any of them and `count(column)`
             # is the same number for every column. The GUI uses this count to
@@ -571,6 +602,16 @@ class ConsDbSchema:
         result = self.fetch_data(query_model)
 
         # Adjust result structure for aggregator
+        if group_columns:
+            if counting:
+                # Fan the single per-group count out to every requested column.
+                counts = result["count"]
+                return {
+                    **{column.key: result[column.key] for column in group_columns},
+                    **{column.key: counts for column in table_columns},
+                }
+            return result
+
         if counting:
             # One `count(*)` stands in for the identical per-column counts.
             count = next(iter(result.values()))[0]

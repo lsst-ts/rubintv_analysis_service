@@ -228,6 +228,70 @@ class TestLoadColumnsWithAggregatorCommand(TestCommand):
         # Based on test data, ra values <= 20 are: [10] (2 non-null value)
         self.assertEqual(data, {"exposure.ra": 2, "exposure.dec": 2})
 
+    def test_count_rows_grouped(self):
+        """
+        Test counting rows per group with an aggregator and group_by.
+        """
+        self.setUpTest()
+        command = {
+            **self.base_command,
+            "parameters": {
+                **self.base_command["parameters"],
+                "aggregator": "count",
+                "group_by": ["exposure.day_obs"],
+            },
+        }
+        content = self.execute_command(command, "table columns")
+        # Rows with a null ra or dec are excluded before counting; the groups
+        # are ordered by the group column.
+        self.assertEqual(
+            content["data"],
+            {
+                "exposure.day_obs": ["2023-02-14", "2023-05-19"],
+                self.columns[0]: [3, 4],
+                self.columns[1]: [3, 4],
+            },
+        )
+
+    def test_aggregate_grouped(self):
+        """
+        Test a per-column aggregator with group_by.
+        """
+        self.setUpTest()
+        command = {
+            **self.base_command,
+            "parameters": {
+                **self.base_command["parameters"],
+                "aggregator": "max",
+                "group_by": ["exposure.day_obs"],
+            },
+        }
+        content = self.execute_command(command, "table columns")
+        self.assertEqual(
+            content["data"],
+            {
+                "exposure.day_obs": ["2023-02-14", "2023-05-19"],
+                self.columns[0]: [100, 50],
+                self.columns[1]: [50, 0],
+            },
+        )
+
+    def test_group_by_requires_aggregator(self):
+        """
+        group_by without an aggregator is rejected rather than ignored.
+        """
+        self.setUpTest()
+        command = {
+            **self.base_command,
+            "parameters": {
+                **self.base_command["parameters"],
+                "group_by": ["exposure.day_obs"],
+            },
+        }
+        content = self.execute_command(command, "error")
+        self.assertEqual(content["error"], "execution error")
+        self.assertIn("group_by", content["description"])
+
 
 class TestCalculateBoundsCommand(TestCommand):
     def test_calculate_bounds_command(self):
@@ -431,3 +495,38 @@ class TestSendFitsImageCommand(TestCommand):
         content = self.execute_command(command, "get fits image")
         length = len(content["fits"])
         self.assertEqual(length, 4608000)
+
+    def test_error_echoes_request_id(self):
+        """An error reply carries the requestId of the command that failed."""
+
+        def send(command) -> dict:
+            command_json = command if isinstance(command, str) else json.dumps(command)
+            return json.loads(lras.command.execute_command(command_json, self.data_center))
+
+        # Parsing error
+        response = send({"name": "get bounds", "parameters": {"a": 1}, "requestId": "abc,0"})
+        self.assertEqual(response["type"], "error")
+        self.assertEqual(response["content"]["error"], "parsing error")
+        self.assertEqual(response["requestId"], "abc,0")
+
+        # Execution error, with a non-string requestId
+        response = send(
+            {
+                "name": "load columns",
+                "parameters": {"database": "testdb", "columns": ["exposure.not_a_column"]},
+                "requestId": 7,
+            }
+        )
+        self.assertEqual(response["type"], "error")
+        self.assertEqual(response["content"]["error"], "execution error")
+        self.assertEqual(response["requestId"], 7)
+
+        # No requestId on the command: none on the reply either
+        response = send({"name": "invalid name"})
+        self.assertEqual(response["type"], "error")
+        self.assertNotIn("requestId", response)
+
+        # Undecodable command: there is no requestId to echo
+        response = send("{'test': [1,2,3,0004,}")
+        self.assertEqual(response["type"], "error")
+        self.assertNotIn("requestId", response)
