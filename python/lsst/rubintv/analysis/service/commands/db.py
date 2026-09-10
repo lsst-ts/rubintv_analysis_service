@@ -70,6 +70,13 @@ class LoadColumnsCommand(BaseCommand):
         The data IDs to filter the data on.
         If data_ids is specified then only rows with the specified
         day_obs and seq_num are selected.
+    aggregator :
+        SQL aggregate function to apply to each column instead of returning
+        the rows, e.g. ``count``.
+    group_by :
+        ``table.column`` names to group an aggregated query by, e.g.
+        ``["exposure.day_obs"]`` with ``aggregator="count"`` returns the
+        number of matching rows per night. Requires `aggregator`.
     """
 
     database: str
@@ -79,6 +86,7 @@ class LoadColumnsCommand(BaseCommand):
     day_obs: str | None = None
     data_ids: list[tuple[int, int]] | None = None
     aggregator: str | None = None
+    group_by: list[str] | None = None
     request_id: str | None = None
     response_type: str = "table columns"
     is_new_plot: bool = False
@@ -120,7 +128,7 @@ class LoadColumnsCommand(BaseCommand):
                     operator="AND",
                 )
 
-        data = database.query(self.columns, query, self.data_ids, self.aggregator)
+        data = database.query(self.columns, query, self.data_ids, self.aggregator, self.group_by)
 
         if not data:
             data = []
@@ -144,6 +152,7 @@ class LoadColumnsCommand(BaseCommand):
             "day_obs": self.day_obs,
             "data_ids_count": len(self.data_ids) if self.data_ids else 0,
             "aggregator": self.aggregator,
+            "group_by": self.group_by,
             "is_new_plot": self.is_new_plot,
         }
 
