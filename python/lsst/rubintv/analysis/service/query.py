@@ -38,6 +38,11 @@ class QueryError(Exception):
     pass
 
 
+# How an operator flips when it sits to the *left* of the field
+# (``5 < x`` is ``x > 5``). Keyed by the operator names the clients send,
+# which for the string operators are the ``EqualityQuery`` names
+# (``startswith``, not ``starts with``); the spaced spellings are kept so any
+# older caller that used them keeps working.
 left_operator = {
     "eq": "eq",
     "ne": "ne",
@@ -45,9 +50,11 @@ left_operator = {
     "le": "ge",
     "gt": "lt",
     "ge": "le",
-    "starts with": "starts with",
-    "ends with": "ends with",
+    "startswith": "startswith",
+    "endswith": "endswith",
     "contains": "contains",
+    "starts with": "startswith",
+    "ends with": "endswith",
 }
 
 

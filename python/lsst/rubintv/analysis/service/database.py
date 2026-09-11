@@ -68,6 +68,13 @@ flex_tables = [
 ]
 
 
+# Aggregate functions a client may ask for. `sqlalchemy.func` generates any
+# name on demand rather than raising for an unknown one, so an aggregator has
+# to be checked against a list like this: without it a typo reaches the
+# database as an unknown-function error instead of a clear rejection.
+VALID_AGGREGATORS = frozenset({"count", "sum", "avg", "min", "max"})
+
+
 class UnrecognizedTableError(Exception):
     """An error that occurs when a table name does not appear in the schema"""
 
@@ -188,7 +195,14 @@ class JoinBuilder:
         result :
             The join between all of the tables.
         """
-        tables = list(table_names)
+        # Sort the tables so that the same set of tables always produces the
+        # same SQL. The anchor table (the one the `FROM` clause starts from)
+        # is `tables[0]`, so an arbitrary set ordering would otherwise emit a
+        # different, though equivalent, statement for identical requests.
+        # Most connected first keeps the anchor on a hub table such as
+        # `exposure` or `visit1`, which keeps the join paths short, and the
+        # name breaks ties so the order is fully determined.
+        tables = sorted(table_names, key=lambda name: (-len(self.join_graph[name]), name))
         select_from = self.tables[tables[0]]
         # Use the first table as the starting point
         joined_tables = set([tables[0]])
@@ -478,6 +492,7 @@ class ConsDbSchema:
         query: Query | None = None,
         data_ids: list[tuple[int, int]] | None = None,
         aggregator: str | None = None,
+        group_by: list[str] | None = None,
     ) -> dict[str, list] | dict[str, int]:
         """
         Query a table and return the results.
@@ -493,17 +508,32 @@ class ConsDbSchema:
             The data IDs to query, in the format ``(day_obs, seq_num)``.
         aggregator : str | None
             The SQL aggregation function to apply (e.g., 'sum', 'avg').
+        group_by : list[str] | None
+            ``table.column`` names to group an aggregated query by, giving
+            one aggregate per distinct combination of their values rather
+            than one for the whole selection. Requires ``aggregator``.
 
         Returns
         -------
         result : dict[str, list] | dict[str, int]
             A dictionary of columns as keys and lists of values or aggregated
-            results as values.
+            results as values. With ``group_by`` the result is columnar again:
+            the group columns and the aggregated columns, one entry per group,
+            ordered by the group columns.
         """
+        if group_by and aggregator is None:
+            raise ValueError("'group_by' requires an 'aggregator'.")
+
         # Get the models for the columns
         table_columns, table_names, data_id_columns = self.get_column_models(columns, aggregator is not None)
         if data_id_columns:
             day_obs_column, seq_num_column = data_id_columns
+
+        group_columns: list[sqlalchemy.Column] = []
+        for name in group_by or []:
+            table_name, _ = name.split(".")
+            table_names.add(table_name)
+            group_columns.append(self.get_column(name).label(name))
 
         logger.info(f"Table names: {table_names}")
 
@@ -523,13 +553,42 @@ class ConsDbSchema:
             data_id_select = sqlalchemy.tuple_(day_obs_column, seq_num_column).in_(data_ids)
             query_model = sqlalchemy.and_(query_model, data_id_select)
 
-        if aggregator is not None:
-            # Validate and apply the aggregator
-            try:
-                aggregate_func = getattr(sqlalchemy.func, aggregator.lower())
-            except AttributeError:
-                raise ValueError(f"Invalid aggregator '{aggregator}' provided.")
+        if aggregator is not None and aggregator.lower() not in VALID_AGGREGATORS:
+            raise ValueError(
+                f"Invalid aggregator '{aggregator}' provided. "
+                f"Valid aggregators are {sorted(VALID_AGGREGATORS)}."
+            )
 
+        counting = aggregator is not None and aggregator.lower() == "count"
+
+        if group_columns:
+            # One aggregate per group. `count(*)` for the same reason as the
+            # ungrouped count below; other aggregators aggregate each column.
+            if counting:
+                aggregates = [sqlalchemy.func.count().label("count")]
+            else:
+                aggregate_func = getattr(sqlalchemy.func, aggregator.lower())
+                aggregates = [aggregate_func(column).label(column.key) for column in table_columns]
+            query_model = (
+                sqlalchemy.select(*group_columns, *aggregates)
+                .select_from(select_from)
+                .where(query_model)
+                .group_by(*group_columns)
+                .order_by(*group_columns)
+            )
+        elif counting:
+            # Every selected column is already forced `IS NOT NULL` above, so
+            # no surviving row has a null in any of them and `count(column)`
+            # is the same number for every column. The GUI uses this count to
+            # ask the user whether to load the full set, so it only needs that
+            # one number: select a single `count(*)`, which the database can
+            # satisfy without reading each column's values, and fan the result
+            # back out to the per-column keys the client expects.
+            query_model = (
+                sqlalchemy.select(sqlalchemy.func.count()).select_from(select_from).where(query_model)
+            )
+        elif aggregator is not None:
+            aggregate_func = getattr(sqlalchemy.func, aggregator.lower())
             query_model = (
                 sqlalchemy.select(*[aggregate_func(column) for column in table_columns])
                 .select_from(select_from)
@@ -543,6 +602,21 @@ class ConsDbSchema:
         result = self.fetch_data(query_model)
 
         # Adjust result structure for aggregator
+        if group_columns:
+            if counting:
+                # Fan the single per-group count out to every requested column.
+                counts = result["count"]
+                return {
+                    **{column.key: result[column.key] for column in group_columns},
+                    **{column.key: counts for column in table_columns},
+                }
+            return result
+
+        if counting:
+            # One `count(*)` stands in for the identical per-column counts.
+            count = next(iter(result.values()))[0]
+            return {column.key: count for column in table_columns}
+
         if aggregator is not None:
             # Flatten result for single aggregated value
             values = iter(result.values())

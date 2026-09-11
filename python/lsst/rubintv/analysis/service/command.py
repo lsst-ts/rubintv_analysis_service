@@ -27,7 +27,7 @@ import time
 import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .data import DataCenter
@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("lsst.rubintv.analysis.service.command")
 
 
-def construct_error_message(error_name: str, description: str, traceback: str) -> str:
+def construct_error_message(error_name: str, description: str, traceback: str, request_id: Any = None) -> str:
     """Use a standard format for all error messages.
 
     Parameters
@@ -45,25 +45,32 @@ def construct_error_message(error_name: str, description: str, traceback: str) -
         Name of the error.
     description :
         Description of the error.
+    traceback :
+        The formatted traceback of the error.
+    request_id :
+        The ``requestId`` of the command that failed, echoed back so the
+        client can match the error to its request. Omitted from the message
+        when the command carried none (or could not be parsed at all).
 
     Returns
     -------
     result :
         JSON formatted string.
     """
-    return json.dumps(
-        {
-            "type": "error",
-            "content": {
-                "error": error_name,
-                "description": description,
-                "traceback": traceback,
-            },
-        }
-    )
+    message: dict[str, Any] = {
+        "type": "error",
+        "content": {
+            "error": error_name,
+            "description": description,
+            "traceback": traceback,
+        },
+    }
+    if request_id is not None:
+        message["requestId"] = request_id
+    return json.dumps(message)
 
 
-def error_msg(error: Exception, traceback: str) -> str:
+def error_msg(error: Exception, traceback: str, request_id: Any = None) -> str:
     """Handle errors received while parsing or executing a command.
 
     Parameters
@@ -71,6 +78,10 @@ def error_msg(error: Exception, traceback: str) -> str:
     error :
         The error that was raised while parsing, executing,
         or responding to a command.
+    traceback :
+        The formatted traceback of the error.
+    request_id :
+        The ``requestId`` of the failed command, if it had one.
 
     Returns
     -------
@@ -79,23 +90,23 @@ def error_msg(error: Exception, traceback: str) -> str:
 
     """
     if isinstance(error, json.decoder.JSONDecodeError):
-        return construct_error_message("JSON decoder error", error.args[0], traceback)
+        return construct_error_message("JSON decoder error", error.args[0], traceback, request_id)
 
     if isinstance(error, CommandParsingError):
-        return construct_error_message("parsing error", error.args[0], traceback)
+        return construct_error_message("parsing error", error.args[0], traceback, request_id)
 
     if isinstance(error, CommandExecutionError):
-        return construct_error_message("execution error", error.args[0], traceback)
+        return construct_error_message("execution error", error.args[0], traceback, request_id)
 
     if isinstance(error, CommandResponseError):
-        return construct_error_message("command response error", error.args[0], traceback)
+        return construct_error_message("command response error", error.args[0], traceback, request_id)
 
     # We should always receive one of the above errors, so the code should
     # never get to here. But we generate this response just in case something
     # very unexpected happens, or (more likely) the code is altered in such a
     # way that this line is it.
     msg = "An unknown error occurred, you should never reach this message."
-    return construct_error_message(error.__class__.__name__, msg, traceback)
+    return construct_error_message(error.__class__.__name__, msg, traceback, request_id)
 
 
 class CommandParsingError(Exception):
@@ -240,6 +251,10 @@ def execute_command(command_str: str, data_center: DataCenter) -> str:
         traceback_string = traceback.format_exc()
         return error_msg(err, traceback_string)
 
+    # Echo the requestId on every reply, errors included, so the client can
+    # match the reply to the request that produced it.
+    request_id = command_dict.get("requestId")
+
     try:
         logger.info(f"Parsing command {command_dict}")
         if "name" not in command_dict.keys():
@@ -250,7 +265,6 @@ def execute_command(command_str: str, data_center: DataCenter) -> str:
 
         parameters = command_dict.get("parameters", {})
 
-        request_id = command_dict.get("requestId")
         if request_id is not None:
             parameters["request_id"] = request_id
 
@@ -259,7 +273,9 @@ def execute_command(command_str: str, data_center: DataCenter) -> str:
     except Exception as err:
         logger.exception(f"Error parsing command {command_dict}")
         traceback_string = traceback.format_exc()
-        return error_msg(CommandParsingError(f"'{err}' error while parsing command"), traceback_string)
+        return error_msg(
+            CommandParsingError(f"'{err}' error while parsing command"), traceback_string, request_id
+        )
 
     try:
         logger.info(f"Executing command {command_str}")
@@ -267,7 +283,9 @@ def execute_command(command_str: str, data_center: DataCenter) -> str:
     except Exception as err:
         logger.exception(f"Error executing command {command_dict}")
         traceback_string = traceback.format_exc()
-        return error_msg(CommandExecutionError(f"{err} error executing command."), traceback_string)
+        return error_msg(
+            CommandExecutionError(f"{err} error executing command."), traceback_string, request_id
+        )
 
     try:
         result = command.to_json()
@@ -275,7 +293,9 @@ def execute_command(command_str: str, data_center: DataCenter) -> str:
         logger.exception("Error converting command response to JSON.")
         traceback_string = traceback.format_exc()
         return error_msg(
-            CommandResponseError(f"{err} error converting command response to JSON."), traceback_string
+            CommandResponseError(f"{err} error converting command response to JSON."),
+            traceback_string,
+            request_id,
         )
 
     return result
