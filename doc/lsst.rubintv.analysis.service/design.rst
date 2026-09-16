@@ -35,6 +35,18 @@ All commands derive from the `BaseCommand` class, which provides a common interf
 
 The `BaseCommand.build_contents` method is called during execution, and must return the result as a `dict` that will be converted into JSON and returned to the user.
 
+Values in a result
+------------------
+
+A result is passed through ``to_json_safe`` in ``command.py`` before it is encoded, so a command can return what the database driver, numpy or the stack hands it and need not convert values itself. The rules follow what the Flutter client (``lib/workspace/data.dart``) does with each ConsDB ``datatype``:
+
+- ``int``, ``long``, ``float``, ``double``: sent as JSON numbers; the client reads them with ``toDouble()``. A float that is ``NaN`` or infinite is a problem: Python would write the bare tokens ``NaN`` and ``Infinity``, which are not JSON and make Dart's ``jsonDecode`` reject the whole message. A "load columns" query therefore drops any row holding one in a requested column, exactly as it already excludes rows where a column is ``NULL``, and any such value left elsewhere (an aggregate of an all-``NaN`` column, say) is sent as ``null``. The count that precedes a load can include those rows and so slightly overstate what arrives.
+- ``string``, ``text``, ``boolean``: sent as JSON strings and booleans. The client ignores boolean columns.
+- ``timestamp``: the driver returns a ``datetime``, which is sent as ``YYYY-MM-DD HH:MM:SS`` with ``.ffffff`` appended when there is a fractional second, e.g. ``2023-05-19 20:20:20.123456``. This is what ``rubin_chart``'s ``dateFromString`` parses: it splits on the space, so the ISO ``T`` separator and any zone suffix would break it. ConsDB stores TAI without a zone; an aware datetime from elsewhere is converted to UTC and its zone dropped. A ``date`` or ``time`` is sent as its ISO string and a ``timedelta`` as seconds.
+- numpy scalars and arrays become the equivalent Python values, ``Decimal`` a float, ``UUID`` a string, tuples and sets lists.
+
+Anything else fails in ``json.dumps`` and is reported to the client as a ``command response error`` rather than being stringified, so a new value type shows up as an error instead of a wrongly-typed column. ``tests/test_flutter_contract.py`` pins the timestamp format and the absence of ``NaN``; change the client's parsing and that test together.
+
 Configuration
 =============
 
