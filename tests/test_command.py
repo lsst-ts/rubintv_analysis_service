@@ -19,14 +19,21 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import datetime
+import decimal
 import json
+import math
+import unittest
+import uuid
 from typing import cast
 from unittest.mock import MagicMock, patch
 
 import astropy.table
 import lsst.rubintv.analysis.service as lras
+import numpy as np
 import pytest
 import utils
+from lsst.rubintv.analysis.service.command import format_timestamp, to_json_safe
 
 
 class TestCommand(utils.RasTestCase):
@@ -530,3 +537,162 @@ class TestSendFitsImageCommand(TestCommand):
         response = send("{'test': [1,2,3,0004,}")
         self.assertEqual(response["type"], "error")
         self.assertNotIn("requestId", response)
+
+
+class TestJsonSerialization(unittest.TestCase):
+    """The conversion of driver and numpy values into JSON."""
+
+    def test_json_types_are_unchanged(self):
+        result = {"int": 1, "float": 1.5, "str": "s", "bool": True, "none": None, "list": [1, "a"]}
+        self.assertEqual(to_json_safe(result), result)
+        # bool is a subclass of int and must not be mistaken for a number to
+        # check for finiteness, or anything else.
+        self.assertIs(to_json_safe(False), False)
+
+    def test_timestamps(self):
+        self.assertEqual(format_timestamp(datetime.datetime(2023, 5, 19, 20, 20, 20)), "2023-05-19 20:20:20")
+        self.assertEqual(
+            format_timestamp(datetime.datetime(2023, 5, 19, 20, 20, 20, 123456)),
+            "2023-05-19 20:20:20.123456",
+        )
+        # An aware timestamp is sent as UTC with the zone dropped.
+        aware = datetime.datetime(
+            2023, 5, 19, 22, 20, 20, tzinfo=datetime.timezone(datetime.timedelta(hours=2))
+        )
+        self.assertEqual(format_timestamp(aware), "2023-05-19 20:20:20")
+        self.assertEqual(to_json_safe(datetime.datetime(2023, 5, 19, 20, 20, 20)), "2023-05-19 20:20:20")
+
+    def test_other_temporal_types(self):
+        self.assertEqual(to_json_safe(datetime.date(2023, 5, 19)), "2023-05-19")
+        self.assertEqual(to_json_safe(datetime.time(20, 20, 20)), "20:20:20")
+        self.assertEqual(to_json_safe(datetime.timedelta(minutes=1, seconds=30)), 90.0)
+
+    def test_non_finite_floats_become_null(self):
+        self.assertIsNone(to_json_safe(float("nan")))
+        self.assertIsNone(to_json_safe(float("inf")))
+        self.assertIsNone(to_json_safe(float("-inf")))
+        self.assertEqual(to_json_safe([1.0, float("nan"), 2.0]), [1.0, None, 2.0])
+
+    def test_decimal_and_uuid(self):
+        self.assertEqual(to_json_safe(decimal.Decimal("1.25")), 1.25)
+        self.assertIsNone(to_json_safe(decimal.Decimal("NaN")))
+        identifier = uuid.UUID("12345678-1234-5678-1234-567812345678")
+        self.assertEqual(to_json_safe(identifier), str(identifier))
+
+    def test_numpy(self):
+        self.assertEqual(to_json_safe(np.int64(3)), 3)
+        self.assertIsInstance(to_json_safe(np.int64(3)), int)
+        self.assertEqual(to_json_safe(np.float32(1.5)), 1.5)
+        self.assertIsNone(to_json_safe(np.float64("nan")))
+        self.assertIs(to_json_safe(np.bool_(True)), True)
+        self.assertEqual(to_json_safe(np.array([[1, 2], [3, 4]])), [[1, 2], [3, 4]])
+        self.assertEqual(to_json_safe(np.array([1.0, np.nan])), [1.0, None])
+        self.assertEqual(
+            to_json_safe(np.datetime64("2023-05-19T20:20:20.123456")),
+            "2023-05-19 20:20:20.123456",
+        )
+
+    def test_containers(self):
+        self.assertEqual(to_json_safe((1, 2)), [1, 2])
+        self.assertEqual(to_json_safe({3}), [3])
+        nested = {"a": [{"b": (datetime.date(2023, 5, 19), float("nan"))}]}
+        self.assertEqual(to_json_safe(nested), {"a": [{"b": ["2023-05-19", None]}]})
+
+    def test_unknown_types_still_fail(self):
+        # Rather than stringifying whatever it does not recognise, the
+        # conversion leaves it for json.dumps to reject.
+        class Opaque:
+            pass
+
+        opaque = Opaque()
+        self.assertIs(to_json_safe(opaque), opaque)
+        with self.assertRaises(TypeError):
+            json.dumps(to_json_safe({"x": opaque}))
+
+
+class TestResultSerialization(TestCommand):
+    """The values a query can produce, sent through a real command."""
+
+    def load(self, rows: dict) -> str:
+        """Send "load columns", with the database returning ``rows``."""
+        with patch.object(self.database, "fetch_data", return_value=rows):
+            return lras.command.execute_command(
+                json.dumps(
+                    {
+                        "name": "load columns",
+                        "parameters": {"database": "testdb", "columns": ["exposure.obs_start"]},
+                        "requestId": "r1",
+                    }
+                ),
+                self.data_center,
+            )
+
+    def test_timestamps_and_non_finite_values_are_serialized(self):
+        rows = {
+            "exposure.obs_start": [
+                datetime.datetime(2023, 5, 19, 20, 20, 20),
+                datetime.datetime(2023, 5, 19, 21, 21, 21, 500000),
+            ],
+            "exposure.obs_start_mjd": [np.float64(60083.847453703704), decimal.Decimal("60083.9")],
+            "day_obs": [np.int64(20230519), 20230519],
+            "seq_num": [0, 1],
+        }
+        reply = self.load(rows)
+        content = json.loads(reply)
+        self.assertEqual(content["type"], "table columns")
+        self.assertEqual(content["requestId"], "r1")
+        self.assertEqual(
+            content["content"]["data"],
+            {
+                "exposure.obs_start": ["2023-05-19 20:20:20", "2023-05-19 21:21:21.500000"],
+                "exposure.obs_start_mjd": [60083.847453703704, 60083.9],
+                "day_obs": [20230519, 20230519],
+                "seq_num": [0, 1],
+            },
+        )
+
+    def test_rows_with_nan_are_dropped(self):
+        rows = {
+            "exposure.obs_start": [datetime.datetime(2023, 5, 19, n) for n in range(4)],
+            "exposure.ra": [1.0, float("nan"), 3.0, float("inf")],
+            "day_obs": [20230519] * 4,
+            "seq_num": [0, 1, 2, 3],
+        }
+        content = json.loads(self.load(rows))["content"]
+        self.assertEqual(content["data"]["seq_num"], [0, 2])
+        self.assertEqual(content["data"]["exposure.ra"], [1.0, 3.0])
+        self.assertEqual(
+            content["data"]["exposure.obs_start"], ["2023-05-19 00:00:00", "2023-05-19 02:00:00"]
+        )
+
+    def test_aggregate_nan_is_sent_as_null(self):
+        with patch.object(self.database, "fetch_data", return_value={"avg_1": [float("nan")]}):
+            reply = lras.command.execute_command(
+                json.dumps(
+                    {
+                        "name": "load columns",
+                        "parameters": {"database": "testdb", "columns": ["exposure.ra"], "aggregator": "avg"},
+                    }
+                ),
+                self.data_center,
+            )
+        self.assertNotIn("NaN", reply)
+        self.assertEqual(json.loads(reply)["content"]["data"], {"exposure.ra": None})
+
+    def test_unserializable_result_is_a_response_error(self):
+        reply = json.loads(self.load({"exposure.obs_start": [object()]}))
+        self.assertEqual(reply["type"], "error")
+        self.assertEqual(reply["content"]["error"], "command response error")
+        self.assertEqual(reply["requestId"], "r1")
+
+    def test_nan_cannot_reach_the_client(self):
+        # allow_nan=False is the backstop should a value ever escape
+        # to_json_safe: the reply is an error, never invalid JSON.
+        command = lras.command.BaseCommand.command_registry["load columns"](
+            database="testdb", columns=["exposure.ra"]
+        )
+        command.result = {"type": "table columns", "content": {"data": {"exposure.ra": [1.0]}}}
+        with patch("lsst.rubintv.analysis.service.command.to_json_safe", side_effect=lambda value: value):
+            command.result["content"]["data"]["exposure.ra"] = [math.nan]
+            with self.assertRaises(ValueError):
+                command.to_json()

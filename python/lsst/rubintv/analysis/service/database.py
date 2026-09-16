@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import time
 
@@ -73,6 +74,46 @@ flex_tables = [
 # to be checked against a list like this: without it a typo reaches the
 # database as an unknown-function error instead of a clear rejection.
 VALID_AGGREGATORS = frozenset({"count", "sum", "avg", "min", "max"})
+
+
+def drop_non_finite_rows(data: dict[str, list]) -> dict[str, list]:
+    """Drop every row in which any column holds ``nan`` or an infinity.
+
+    A query already excludes rows where a requested column is ``NULL``, so
+    the client never has to cope with a missing value. A float column can
+    also hold ``NaN`` (and, less often, an infinity), which PostgreSQL treats
+    as a value rather than a null and so passes that filter. Neither can be
+    written as JSON, and the client plots every value it is sent, so those
+    rows are removed here to the same effect as the ``NULL`` filter.
+
+    This is done in Python rather than in the query because the SQL for it
+    is dialect-specific: ``column <> 'NaN'::float8`` is PostgreSQL only, and
+    SQLite cannot store a ``NaN`` at all.
+
+    Parameters
+    ----------
+    data :
+        Columnar data, every column the same length.
+
+    Returns
+    -------
+    data :
+        The same columns with the offending rows removed. The input is
+        returned as it is when nothing needs dropping.
+    """
+    if not data:
+        return data
+    columns = list(data.values())
+    keep = [
+        index
+        for index in range(len(columns[0]))
+        if not any(
+            isinstance(column[index], float) and not math.isfinite(column[index]) for column in columns
+        )
+    ]
+    if len(keep) == len(columns[0]):
+        return data
+    return {name: [values[index] for index in keep] for name, values in data.items()}
 
 
 class UnrecognizedTableError(Exception):
@@ -622,7 +663,12 @@ class ConsDbSchema:
             values = iter(result.values())
             return {column.key: next(values)[0] for column in table_columns}
 
-        return result
+        # The client plots every row it receives, so a row with a `nan` in a
+        # requested column is dropped just as a `NULL` is filtered above.
+        # Aggregates are left alone: their single values are sent as `null`
+        # if non-finite, and a count that includes such rows is only used to
+        # ask the user whether to load the data at all.
+        return drop_non_finite_rows(result)
 
     def calculate_bounds(self, column: str) -> tuple[float, float]:
         """Calculate the min, max for a column
