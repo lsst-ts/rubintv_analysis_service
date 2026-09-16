@@ -27,6 +27,11 @@ locations:
     butlers:
       - embargo
     # efd_url: connection info here
+# The lsst-sdm-schemas release the schema files below are read from. One is
+# published per science-pipelines weekly (30.2026.3700 is w_2026_37); bump it
+# here to pick up ConsDB schema changes. The container's own stack copy is
+# ignored, so the worker sees the same tables at every site.
+sdm_schemas_version: "30.2026.3700"
 schemas:
   cdb_latiss: cdb_latiss.yaml
   cdb_lsstcomcam: cdb_lsstcomcam.yaml

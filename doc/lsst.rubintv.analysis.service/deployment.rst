@@ -147,8 +147,43 @@ Path                                       Contents
 ``/sdf/group/rubin``, ``/sdf/data/rubin``  Shared Rubin filesystems
 =========================================  ==============================
 
-``$SDM_SCHEMAS_DIR`` must also be set; the worker reads the ConsDB schema YAML
-files from ``$SDM_SCHEMAS_DIR/yml`` at startup.
+ConsDB schema files
+-------------------
+
+The worker reads the ``cdb_*.yaml`` schema files listed under ``schemas:`` in
+``config.yaml`` at startup. They come from the ``lsst-sdm-schemas`` package on
+PyPI, which is released once per science-pipelines weekly (``30.2026.3700`` is
+``w_2026_37``), and the version is pinned as ``sdm_schemas_version`` in
+``config.yaml``. At startup the worker installs that version under the
+temporary directory (``/tmp/rubintv-ddv/sdm_schemas/<version>``) with
+``pip install --target`` and reads the files from there, reusing the directory
+on later restarts.
+
+This is deliberate. The image bundles the stack's own ``sdm_schemas``, which
+the launcher's ``setup lsst_distrib`` exports as ``$SDM_SCHEMAS_DIR``, but that
+copy is only as new as the image's weekly and has lagged the live ConsDB by
+months: tables and columns present in the database were missing from the
+frontend. Pinning the version here makes picking up a schema change a one-line
+edit on the deploy branch, with no image or chart change, and every site sees
+the same tables.
+
+The lookup order is:
+
+1. ``--schemas-dir``, a directory that already holds the files;
+2. the pinned ``sdm_schemas_version``, installed on demand;
+3. ``$SDM_SCHEMAS_DIR/yml`` if no version is pinned, or if the install fails
+   (PyPI unreachable, say). The worker then logs the error, warns that it is
+   falling back, and runs on the stack's schemas rather than not at all.
+
+The installed package is never imported. The stack's copy sits on
+``PYTHONPATH`` ahead of anything pip installs, so ``import lsst.sdm.schemas``
+would hand back the stale version; the worker reads the yaml files from the
+install directory by path instead.
+
+**To pick up a new schema release**, change ``sdm_schemas_version`` in
+``config.yaml``, push to the site's deploy branch, and restart the pod. The
+install needs outbound HTTPS to PyPI, which the pod has: the launcher already
+fetches this repository from GitHub at every start.
 
 Connecting to the web app
 =========================
@@ -224,10 +259,26 @@ routes the frontend actually registers.
 and the ``--database`` name. Check the mounted secret and the host in
 ``config.yaml``.
 
-**FileNotFoundError on a schema file.** ``$SDM_SCHEMAS_DIR`` is unset or the
-SDM schemas checkout is missing a file listed under ``schemas:`` in
-``config.yaml``. Note that an unset ``$SDM_SCHEMAS_DIR`` fails here rather than
-at startup, because the path is expanded without validation.
+**Could not install lsst-sdm-schemas==...** pip could not reach PyPI, or the
+pinned version does not exist there. The worker falls back to
+``$SDM_SCHEMAS_DIR/yml`` (logged as a warning) and runs on the stack's older
+schemas, so tables or columns may be missing from the frontend until a restart
+succeeds. Check the version against
+https://pypi.org/project/lsst-sdm-schemas/ and the pod's outbound access.
+
+**No ConsDB schemas: pass --schemas-dir ...** The install failed and there was
+no ``$SDM_SCHEMAS_DIR`` to fall back to, so the worker stopped. Outside the
+image this usually means the stack is not set up in the shell.
+
+**FileNotFoundError on a schema file.** The directory in use (logged at
+startup as ``Reading the ConsDB schemas from ...``) is missing a file listed
+under ``schemas:`` in ``config.yaml``. With ``--schemas-dir`` or the
+``$SDM_SCHEMAS_DIR`` fallback, check the path is the directory that holds the
+``cdb_*.yaml`` files (for a checkout, its ``yml`` subdirectory).
+
+**Tables or columns missing from the frontend that exist in ConsDB.** The
+schemas in use predate the change. Look for the fallback warning above in the
+startup log, otherwise bump ``sdm_schemas_version``.
 
 **Butler connection errors, worker still running.** Butler failures are caught
 and logged rather than fatal, so the worker runs in a degraded state. This will
@@ -260,14 +311,15 @@ the worker now defaults to the v3 web app's endpoint. Without it the handshake
 is rejected with a 403.
 
 The ``dev`` location expects credentials at ``~/.lsst/postgres-credentials.txt``
-rather than the mounted secret path — the other locations read a secret mounted
+rather than the mounted secret path. The other locations read a secret mounted
 into the pod at ``/etc/secrets/``, which does not exist outside the cluster.
 The file is in ``.pgpass`` format and its first field has to match the ``dev``
 host in ``config.yaml`` exactly::
 
    <consdb-host>:5432:exposurelog:<user>:<password>
 
-``$SDM_SCHEMAS_DIR`` must also point at an SDM schemas checkout.
+The schema files are installed from PyPI as in production; to use a local
+``sdm_schemas`` checkout instead, pass ``--schemas-dir <checkout>/yml``.
 
 If the worker exits with ``Could not find credentials for ...`` it never opened
 a connection — the message means no line in that file matched both the host and

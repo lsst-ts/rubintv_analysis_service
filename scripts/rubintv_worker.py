@@ -32,13 +32,13 @@ from lsst.rubintv.analysis.service.commands.db import warm_cameras
 from lsst.rubintv.analysis.service.data import DataCenter, DataMatch
 from lsst.rubintv.analysis.service.database import ConsDbSchema
 from lsst.rubintv.analysis.service.efd import EfdClient
+from lsst.rubintv.analysis.service.schemas import resolve_schemas_dir
 from lsst.rubintv.analysis.service.utils import ServerFormatter
 from lsst.rubintv.analysis.service.worker import DEFAULT_WS_PATH, Worker
 
 default_config = os.path.join(pathlib.Path(__file__).parent.absolute(), "config.yaml")
 default_joins = os.path.join(pathlib.Path(__file__).parent.absolute(), "joins.yaml")
 logger = logging.getLogger("lsst.rubintv.analysis.server.worker")
-sdm_schemas_path = os.path.join(os.path.expandvars("$SDM_SCHEMAS_DIR"), "yml")
 test_credentials_path = os.path.join(os.path.expanduser("~"), ".lsst", "postgres-credentials.txt")
 
 
@@ -60,6 +60,11 @@ class LocationConfig:
         The name of the consdb to connect to.
     butlers : dict[str, dict[str, str]]
         A dictionary of butler configurations.
+    schemas : dict[str, str]
+        The schema yaml file for each ConsDB schema the worker serves.
+    sdm_schemas_version : str | None
+        The version of the ``lsst-sdm-schemas`` package those files come
+        from, or `None` to read them from an ``$SDM_SCHEMAS_DIR`` checkout.
     """
 
     users_path: str
@@ -67,6 +72,7 @@ class LocationConfig:
     consdb: str
     butlers: list[str]
     schemas: dict[str, str]
+    sdm_schemas_version: str | None
     efd_url: str | None
 
     def __init__(self, location: str, yaml_config: dict[str, Any]):
@@ -87,6 +93,8 @@ class LocationConfig:
 
         # Set other attributes
         self.schemas = yaml_config["schemas"]
+        version = yaml_config.get("sdm_schemas_version")
+        self.sdm_schemas_version = None if version is None else str(version)
 
 
 def main():
@@ -109,6 +117,13 @@ def main():
         "-c", "--config", default=default_config, type=str, help="Location of the configuration file."
     )
     parser.add_argument("-j", "--joins", default=default_joins, type=str, help="Location of the joins file.")
+    parser.add_argument(
+        "--schemas-dir",
+        default=None,
+        type=str,
+        help="Directory holding the ConsDB schema yaml files. Overrides the lsst-sdm-schemas "
+        "version pinned in the config file, which is otherwise installed on demand.",
+    )
     parser.add_argument(
         "-l",
         "--location",
@@ -176,6 +191,8 @@ def main():
         # --log-all, which hides INFO.
         "lsst.rubintv.analysis.service.database",
         "lsst.rubintv.analysis.service.commands.db",
+        # Reports which schema files are in use, and any install failure.
+        "lsst.rubintv.analysis.service.schemas",
     ]:
         logger = logging.getLogger(logger_name)
         logger.setLevel(worker_log_level)
@@ -208,8 +225,10 @@ def main():
     # Initialize the data center that provides access to various data sources
     schemas: dict[str, ConsDbSchema] = {}
 
+    schemas_dir = resolve_schemas_dir(config.sdm_schemas_version, explicit=args.schemas_dir)
+    logger.info(f"Reading the ConsDB schemas from {schemas_dir}")
     for name, filename in config.schemas.items():
-        full_path = os.path.join(sdm_schemas_path, filename)
+        full_path = os.path.join(schemas_dir, filename)
         with open(full_path, "r") as file:
             schema = yaml.safe_load(file)
             schemas[name] = ConsDbSchema(schema=schema, engine=engine, join_templates=joins)
