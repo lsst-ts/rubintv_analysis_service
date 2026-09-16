@@ -43,13 +43,14 @@ logger = logging.getLogger("lsst.rubintv.analysis.service.command")
 
 
 def format_timestamp(value: datetime.datetime) -> str:
-    """Format a timestamp the way the Flutter client parses it.
+    """Format a timestamp the way the clients parse it.
 
-    ``rubin_chart``'s ``dateFromString`` splits the string on a single space
-    and reads ``year-month-day`` and ``hours:minutes:seconds`` (seconds may
-    carry a fraction) from the two halves. It does not understand the ``T``
-    separator or a zone suffix, so this is deliberately not
-    `datetime.isoformat` with its defaults.
+    The React client (``rubintv-ddv``, ``parseTimestampMs``) recognises a
+    ``YYYY-MM-DD `` prefix and swaps the space for ``T`` before
+    ``Date.parse``; ``rubin_chart``'s ``dateFromString`` in the Flutter
+    client splits on the space and reads the two halves. Neither wants a
+    zone suffix, so this is deliberately not `datetime.isoformat` with its
+    defaults.
 
     ConsDB timestamps are ``timestamp without time zone`` columns holding
     TAI, which the driver returns as naive datetimes; those are formatted as
