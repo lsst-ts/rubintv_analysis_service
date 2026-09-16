@@ -29,8 +29,10 @@ speak this protocol, so a change made for one must keep these passing for
 the other.
 """
 
+import datetime
 import json
 import os
+import re
 from unittest.mock import MagicMock, patch
 
 import lsst.rubintv.analysis.service as lras
@@ -183,6 +185,64 @@ class TestFlutterContract(utils.RasTestCase):
         }
         reply = self.load_columns(query=query, global_query=global_query)
         self.assertEqual(reply["content"]["data"]["seq_num"], [0, 1, 3, 5, 8])
+
+    def strict_decode(self, reply: str) -> dict:
+        """Decode as Dart's ``jsonDecode`` does.
+
+        ``NaN`` and ``Infinity`` are not JSON and are rejected.
+        """
+
+        def reject(token):
+            raise AssertionError(f"{token} is not JSON and the client cannot decode it")
+
+        return json.loads(reply, parse_constant=reject)
+
+    def test_timestamps_use_the_format_date_from_string_parses(self):
+        # workspace/data.dart maps datatype "timestamp" to
+        # ColumnDataType.dateTime and parses each value with rubin_chart's
+        # dateFromString, which splits on a space and reads "year-month-day"
+        # then "hours:minutes:seconds[.fraction]". No "T", no zone suffix.
+        rows = {
+            "exposure.obs_start": [
+                datetime.datetime(2023, 5, 19, 20, 20, 20),
+                datetime.datetime(2023, 5, 19, 20, 20, 20, 123456),
+            ],
+            "day_obs": [20230519, 20230519],
+            "seq_num": [0, 1],
+        }
+        with patch.object(self.database, "fetch_data", return_value=rows):
+            reply = self.load_columns(columns=["exposure.obs_start"])
+        values = reply["content"]["data"]["exposure.obs_start"]
+        pattern = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{1,6})?$")
+        for value in values:
+            self.assertRegex(value, pattern)
+        self.assertEqual(values, ["2023-05-19 20:20:20", "2023-05-19 20:20:20.123456"])
+
+    def test_number_columns_never_carry_nan(self):
+        # base.dart reads every number with toDouble() and jsonDecode rejects
+        # the NaN token outright, so a row with a nan must not be sent at all.
+        rows = {
+            "exposure.ra": [1.0, float("nan"), 3.0],
+            "exposure.dec": [-1.0, -2.0, float("inf")],
+            "day_obs": [20230519] * 3,
+            "seq_num": [0, 1, 2],
+        }
+        with patch.object(self.database, "fetch_data", return_value=rows):
+            raw = lras.command.execute_command(
+                json.dumps(
+                    {
+                        "name": "load columns",
+                        "parameters": {"database": "testdb", "columns": COLUMNS},
+                        "requestId": WINDOW_SERIES_REQUEST_ID,
+                    }
+                ),
+                self.data_center,
+            )
+        reply = self.strict_decode(raw)
+        data = reply["content"]["data"]
+        self.assertEqual(data["seq_num"], [0])
+        self.assertNotIn(None, data["exposure.ra"])
+        self.assertNotIn(None, data["exposure.dec"])
 
     def test_error_reply(self):
         # workspace/state.dart reads content.error, content.description and

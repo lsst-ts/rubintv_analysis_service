@@ -21,19 +21,112 @@
 
 from __future__ import annotations
 
+import datetime
+import decimal
 import json
 import logging
+import math
 import time
 import traceback
+import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
+
+import numpy as np
 
 if TYPE_CHECKING:
     from .data import DataCenter
 
 
 logger = logging.getLogger("lsst.rubintv.analysis.service.command")
+
+
+def format_timestamp(value: datetime.datetime) -> str:
+    """Format a timestamp the way the clients parse it.
+
+    The React client (``rubintv-ddv``, ``parseTimestampMs``) recognises a
+    ``YYYY-MM-DD `` prefix and swaps the space for ``T`` before
+    ``Date.parse``; ``rubin_chart``'s ``dateFromString`` in the Flutter
+    client splits on the space and reads the two halves. Neither wants a
+    zone suffix, so this is deliberately not `datetime.isoformat` with its
+    defaults.
+
+    ConsDB timestamps are ``timestamp without time zone`` columns holding
+    TAI, which the driver returns as naive datetimes; those are formatted as
+    they are. An aware datetime is converted to UTC first and its zone
+    dropped, so the string is still unambiguous.
+
+    Parameters
+    ----------
+    value :
+        The timestamp to format.
+
+    Returns
+    -------
+    formatted :
+        ``YYYY-MM-DD HH:MM:SS`` followed by ``.ffffff`` when the timestamp has
+        a fractional second.
+    """
+    if value.tzinfo is not None:
+        value = value.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+    return value.isoformat(sep=" ")
+
+
+def to_json_safe(value: Any) -> Any:
+    """Convert a command result into values that JSON can carry.
+
+    `json.dumps` only knows the JSON types, but the values that reach a
+    result come from the database driver, numpy and the stack, so this walks
+    the result and rewrites everything else:
+
+    - `datetime.datetime` becomes the string described in `format_timestamp`;
+      `datetime.date` and `datetime.time` become their ISO strings and a
+      `datetime.timedelta` its length in seconds.
+    - A non-finite float (``nan``, ``inf``) becomes ``null``. Python would
+      otherwise emit the bare tokens ``NaN`` and ``Infinity``, which are not
+      JSON and make the Dart client's decoder reject the whole message.
+    - `decimal.Decimal` becomes a float, `uuid.UUID` a string.
+    - numpy scalars and arrays become the equivalent Python values, then are
+      converted again by the rules above.
+    - Tuples and sets become lists.
+
+    Anything else is returned unchanged, so an unsupported type still fails
+    in `json.dumps` with its usual ``TypeError`` rather than being silently
+    stringified.
+
+    Parameters
+    ----------
+    value :
+        The result, or a value within it.
+
+    Returns
+    -------
+    converted :
+        The value with every unsupported type replaced.
+    """
+    if isinstance(value, dict):
+        return {key: to_json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [to_json_safe(item) for item in value]
+    if isinstance(value, np.ndarray):
+        return to_json_safe(value.tolist())
+    if isinstance(value, np.generic):
+        return to_json_safe(value.item())
+    # bool is an int subclass, and is left alone by the float check below.
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, datetime.datetime):
+        return format_timestamp(value)
+    if isinstance(value, (datetime.date, datetime.time)):
+        return value.isoformat()
+    if isinstance(value, datetime.timedelta):
+        return value.total_seconds()
+    if isinstance(value, decimal.Decimal):
+        return to_json_safe(float(value))
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    return value
 
 
 def construct_error_message(error_name: str, description: str, traceback: str, request_id: Any = None) -> str:
@@ -207,13 +300,21 @@ class BaseCommand(ABC):
             raise
 
     def to_json(self, request_id: str | None = None):
-        """Convert the `result` into JSON."""
+        """Convert the `result` into JSON.
+
+        The result is passed through `to_json_safe` first, so timestamps,
+        non-finite floats and numpy values are sent in the form the client
+        expects. ``allow_nan=False`` then guarantees the message is strict
+        JSON: if a ``NaN`` ever slipped past the conversion it is reported
+        here as an error rather than handed to the client, whose decoder
+        would reject it.
+        """
         if self.result is None:
             raise CommandExecutionError(f"Null result for command {self.__class__.__name__}")
         final_request_id = request_id if request_id is not None else self.request_id
         if final_request_id is not None:
             self.result["requestId"] = final_request_id
-        return json.dumps(self.result)
+        return json.dumps(to_json_safe(self.result), allow_nan=False)
 
     @classmethod
     def register(cls, name: str):

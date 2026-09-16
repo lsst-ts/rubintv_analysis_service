@@ -20,8 +20,10 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import itertools
+import math
 import threading
 import time
+from unittest.mock import patch
 
 import astropy.table
 import lsst.rubintv.analysis.service as lras
@@ -313,3 +315,38 @@ class TestDatabase(utils.RasTestCase):
         first = database.get_verified_schema()
         # With no TTL every call recalculates rather than returning the cache.
         self.assertIsNot(database.get_verified_schema(), first)
+
+
+class TestNonFiniteRows(utils.RasTestCase):
+    def test_drop_non_finite_rows(self):
+        data = {
+            "a": [1.0, math.nan, 3.0, math.inf, 5.0],
+            "b": [1, 2, 3, 4, 5],
+            "c": ["p", "q", "r", "s", "t"],
+        }
+        self.assertEqual(
+            lras.database.drop_non_finite_rows(data),
+            {"a": [1.0, 3.0, 5.0], "b": [1, 3, 5], "c": ["p", "r", "t"]},
+        )
+
+    def test_finite_data_is_returned_as_is(self):
+        data = {"a": [1.0, 2.0], "b": [None, "x"]}
+        self.assertIs(lras.database.drop_non_finite_rows(data), data)
+        self.assertEqual(lras.database.drop_non_finite_rows({}), {})
+
+    def test_query_drops_non_finite_rows(self):
+        # sqlite stores NaN as NULL, so the rows come from a patched fetch.
+        rows = {
+            "exposure.ra": [1.0, math.nan, 3.0],
+            "exposure.day_obs": [20230519] * 3,
+            "exposure.seq_num": [0, 1, 2],
+        }
+        with patch.object(self.database, "fetch_data", return_value=rows):
+            result = self.database.query(["exposure.ra"])
+        self.assertEqual(result["exposure.seq_num"], [0, 2])
+        self.assertEqual(result["exposure.ra"], [1.0, 3.0])
+
+    def test_aggregates_are_not_filtered(self):
+        with patch.object(self.database, "fetch_data", return_value={"avg_1": [math.nan]}):
+            result = self.database.query(["exposure.ra"], aggregator="avg")
+        self.assertTrue(math.isnan(result["exposure.ra"]))
