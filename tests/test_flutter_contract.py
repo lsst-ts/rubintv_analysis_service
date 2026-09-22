@@ -211,10 +211,18 @@ class TestFlutterContract(utils.RasTestCase):
         )
         self.assertEqual(reply["type"], "directory files")
         self.assertEqual(reply["requestId"], FILE_DIALOG_REQUEST_ID)
+        # Exactly what the Flutter dialog reads; ``details`` is an addition for
+        # the web client that the Flutter dialog never looks at.
+        content = dict(reply["content"])
+        details = content.pop("details")
         self.assertEqual(
-            reply["content"],
+            content,
             {"path": [], "files": ["workspace.json"], "directories": ["saved"]},
         )
+        self.assertEqual(set(details), {"workspace.json", "saved"})
+        self.assertEqual(details["workspace.json"]["size"], 2)
+        self.assertIsInstance(details["workspace.json"]["modified"], float)
+        self.assertNotIn("size", details["saved"])
 
         # A failed file command still carries a content map; the error is
         # reported inside it.
