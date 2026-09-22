@@ -68,6 +68,10 @@ class FileOperationError(Exception):
 class LoadDirectoryCommand(BaseCommand):
     """Load the files and sub directories contained in a directory.
 
+    The reply lists the names in ``files`` and ``directories``, and gives the
+    modification time (seconds since the epoch) of each, and the size in
+    bytes of each file, in ``details``, keyed by name.
+
     Attributes
     ----------
     path
@@ -91,17 +95,32 @@ class LoadDirectoryCommand(BaseCommand):
             if not os.path.isdir(full_path):
                 raise FileOperationError(f"The path '{full_path}' is not a directory.")
 
-            all_items = os.listdir(full_path)
-            files = [f for f in all_items if os.path.isfile(os.path.join(full_path, f))]
-            directories = [d for d in all_items if os.path.isdir(os.path.join(full_path, d))]
             # strip logs directory
             log_dir = data_center.logs_directory_name
-            directories = [d for d in directories if d != log_dir]
+            files = []
+            directories = []
+            details = {}
+            with os.scandir(full_path) as entries:
+                for entry in entries:
+                    if entry.is_file():
+                        files.append(entry.name)
+                    elif entry.is_dir() and entry.name != log_dir:
+                        directories.append(entry.name)
+                    else:
+                        continue
+                    stat = entry.stat()
+                    details[entry.name] = {"modified": stat.st_mtime}
+                    if entry.is_file():
+                        details[entry.name]["size"] = stat.st_size
 
+            # ``details`` is additive: clients that only know ``files`` and
+            # ``directories`` (the Flutter dialog) ignore it, and clients that
+            # use it must cope with a worker that does not send it.
             return {
                 "path": self.path,
                 "files": sorted(files),
                 "directories": sorted(directories),
+                "details": details,
             }
         except FileOperationError as e:
             logger.error(f"File operation error: {str(e)}")
