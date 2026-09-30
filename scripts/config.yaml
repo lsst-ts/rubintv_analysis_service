@@ -37,3 +37,16 @@ schemas:
   cdb_lsstcomcam: cdb_lsstcomcam.yaml
   cdb_lsstcomcamsim: cdb_lsstcomcamsim.yaml
   cdb_lsstcam: cdb_lsstcam.yaml
+# The transformed EFD tables (exposure_efd and visit1_efd) live in their own
+# efd_<instrument> Postgres schemas and are served as part of the instrument's
+# ConsDB schema above. Their schema files are read from the lsst-dm/consdb
+# repository, whose transformed EFD service generates the tables from them;
+# lsst-sdm-schemas carries copies too, but those are synced by hand and have
+# lagged the database by over a hundred columns. This is the consdb git tag
+# the files are fetched from (https://github.com/lsst-dm/consdb/tags); bump it
+# to pick up new EFD columns. The tables are only populated at USDF.
+consdb_version: "26.9.1"
+efd_schemas:
+  cdb_latiss: efd_latiss.yaml
+  cdb_lsstcomcam: efd_lsstcomcam.yaml
+  cdb_lsstcam: efd_lsstcam.yaml

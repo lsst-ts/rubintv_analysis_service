@@ -53,8 +53,8 @@ Configuration
 
 Configuration for the service is managed through the following YAML files, allowing for flexible deployment and customization of the service's behavior:
 
-- **config.yaml**: Main configuration file specifying service parameters.
-- **joins.yaml**: Configuration for database joins.
+- **config.yaml**: Main configuration file specifying service parameters, including which ConsDB schema files the worker serves and the pinned versions they are read from (the ``lsst-sdm-schemas`` release for the ``cdb_*`` schemas and the ``lsst-dm/consdb`` tag for the transformed EFD's ``efd_*`` schemas; see the deployment guide).
+- **joins.yaml**: Configuration for database joins, including those from an instrument's ConsDB tables to its transformed EFD tables in the separate ``efd_<instrument>`` Postgres schema.
 
 Configuration options can be overwritten using commad line arguments, which are parsed using the `argparse` module.
 

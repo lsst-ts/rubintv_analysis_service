@@ -31,6 +31,10 @@ The package is installed into a private directory and the files are read
 from there directly. It must not be imported: the stack's own copy sits on
 ``PYTHONPATH`` ahead of anything pip installs, so ``import lsst.sdm.schemas``
 would silently give the stale version back.
+
+The transformed EFD schemas (``efd_*.yaml``) are a second, separately pinned
+source: they are fetched from the ``lsst-dm/consdb`` repository on GitHub,
+which generates the tables they describe. See `resolve_efd_schemas_dir`.
 """
 
 from __future__ import annotations
@@ -40,15 +44,24 @@ import os
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable, Mapping
+import urllib.request
+from collections.abc import Callable, Iterable, Mapping
+from typing import IO, ContextManager
 
 __all__ = [
+    "CONSDB_EFD_SCHEMAS_PATH",
+    "CONSDB_REPO",
+    "EFD_SCHEMA_URL",
     "PACKAGE",
     "SDM_SCHEMAS_ENV",
     "SchemaLookupError",
+    "default_efd_install_root",
     "default_install_root",
+    "fetch_efd_schemas",
     "install_schemas",
+    "installed_efd_schemas_dir",
     "installed_schemas_dir",
+    "resolve_efd_schemas_dir",
     "resolve_schemas_dir",
 ]
 
@@ -227,3 +240,171 @@ def resolve_schemas_dir(
         "No ConsDB schemas: pass --schemas-dir, pin sdm_schemas_version in the config file, "
         f"or set ${SDM_SCHEMAS_ENV}"
     )
+
+
+# The transformed EFD schemas.
+#
+# The `exposure_efd` and `visit1_efd` tables are made by the transformed EFD
+# service in lsst-dm/consdb, which creates them from these files, so this is
+# where they are read from. `lsst-sdm-schemas` carries copies too, but they are
+# synced by hand and have lagged the database by more than a hundred columns.
+# There is no PyPI release of consdb, so the files are fetched from GitHub at a
+# tag pinned in `config.yaml`.
+
+CONSDB_REPO = "lsst-dm/consdb"
+"""The GitHub repository holding the transformed EFD schema files."""
+
+CONSDB_EFD_SCHEMAS_PATH = "python/lsst/consdb/transformed_efd/schemas/yml"
+"""Where the ``efd_*.yaml`` files live inside that repository."""
+
+EFD_SCHEMA_URL = "https://raw.githubusercontent.com/{repo}/{version}/{path}/{filename}"
+
+Opener = Callable[[str], ContextManager[IO[bytes]]]
+"""Opens a URL, returning a context manager over the response body."""
+
+
+def _open_url(url: str) -> ContextManager[IO[bytes]]:
+    return urllib.request.urlopen(url, timeout=60)
+
+
+def default_efd_install_root() -> str:
+    """The directory versions of the transformed EFD schemas are kept under.
+
+    Beside `default_install_root`, for the same reason it is under the
+    temporary directory.
+    """
+    return os.path.join(tempfile.gettempdir(), "rubintv-ddv", "consdb_efd_schemas")
+
+
+def installed_efd_schemas_dir(version: str, filenames: Iterable[str], root: str) -> str | None:
+    """The transformed EFD schema files of ``version``, if all already fetched.
+
+    Parameters
+    ----------
+    version :
+        The consdb git tag, e.g. ``"26.9.1"``.
+    filenames :
+        The files that have to be present, e.g. ``["efd_latiss.yaml"]``.
+    root :
+        The directory versions are kept under.
+
+    Returns
+    -------
+    schemas_dir :
+        The directory holding every file, or `None` if any is missing.
+    """
+    target = _target(root, version)
+    if all(os.path.isfile(os.path.join(target, filename)) for filename in filenames):
+        return target
+    return None
+
+
+def fetch_efd_schemas(version: str, filenames: Iterable[str], root: str, opener: Opener = _open_url) -> str:
+    """Fetch the transformed EFD schema files of ``version`` under ``root``.
+
+    Files already present are kept, so an earlier partial fetch is completed
+    rather than repeated. Each file is written under a temporary name and
+    renamed into place, so an interrupted download is never mistaken for a
+    complete file on a later start.
+
+    Parameters
+    ----------
+    version :
+        The consdb git tag to fetch from.
+    filenames :
+        The files to fetch.
+    root :
+        The directory to keep them under; the version gets its own
+        subdirectory so that several can coexist.
+    opener :
+        Opens a URL. Exposed so tests can stand in for the network.
+
+    Returns
+    -------
+    schemas_dir :
+        The directory holding the files.
+
+    Raises
+    ------
+    Exception
+        Whatever ``opener`` raises, typically because GitHub is unreachable
+        or the tag does not exist.
+    """
+    target = _target(root, version)
+    os.makedirs(target, exist_ok=True)
+    for filename in filenames:
+        path = os.path.join(target, filename)
+        if os.path.isfile(path):
+            continue
+        url = EFD_SCHEMA_URL.format(
+            repo=CONSDB_REPO, version=version, path=CONSDB_EFD_SCHEMAS_PATH, filename=filename
+        )
+        logger.info(f"Fetching {url}")
+        with opener(url) as response:
+            content = response.read()
+        partial = path + ".part"
+        with open(partial, "wb") as file:
+            file.write(content)
+        os.replace(partial, path)
+    return target
+
+
+def resolve_efd_schemas_dir(
+    version: str | None,
+    filenames: Iterable[str],
+    explicit: str | None = None,
+    root: str | None = None,
+    opener: Opener = _open_url,
+) -> str | None:
+    """Find the directory of transformed EFD schema files, if any.
+
+    In order of precedence:
+
+    1. ``explicit``, a directory given on the command line;
+    2. the pinned consdb ``version``, fetched on demand and reused on later
+       starts.
+
+    Unlike `resolve_schemas_dir` there is no fallback and no error: the
+    transformed EFD tables are an addition to an instrument's schema, so when
+    they cannot be read the worker serves the instrument without them rather
+    than not at all.
+
+    Parameters
+    ----------
+    version :
+        The consdb git tag pinned in ``config.yaml``, or `None`.
+    filenames :
+        The files needed, e.g. ``["efd_latiss.yaml", "efd_lsstcam.yaml"]``.
+    explicit :
+        A directory that already holds the files, or `None`.
+    root :
+        Where to keep fetched files; defaults to `default_efd_install_root`.
+    opener :
+        Opens a URL; see `fetch_efd_schemas`.
+
+    Returns
+    -------
+    schemas_dir :
+        The directory holding the files, or `None` if there is none.
+    """
+    if explicit:
+        return explicit
+
+    filenames = list(filenames)
+    if not filenames:
+        return None
+    if not version:
+        logger.warning("Transformed EFD schemas are configured but no consdb_version is pinned")
+        return None
+
+    if root is None:
+        root = default_efd_install_root()
+    installed = installed_efd_schemas_dir(version, filenames, root)
+    if installed is not None:
+        logger.info(f"Using the fetched transformed EFD schemas from {CONSDB_REPO} {version}")
+        return installed
+    try:
+        return fetch_efd_schemas(version, filenames, root, opener)
+    except Exception as e:
+        logger.error(f"Could not fetch the transformed EFD schemas from {CONSDB_REPO} {version}: {e}")
+        return None

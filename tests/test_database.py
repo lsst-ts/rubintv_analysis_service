@@ -19,26 +19,35 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import copy
 import itertools
 import math
+import os
 import threading
 import time
 from unittest.mock import patch
 
 import astropy.table
 import lsst.rubintv.analysis.service as lras
+import numpy as np
+import sqlalchemy
 import utils
+import yaml
 
 
 class TestDatabase(utils.RasTestCase):
     def test_get_table_names(self):
         table_names = self.database.get_table_names()
+        # The transformed EFD tables come after the instrument's own, and the
+        # unpivoted ones are never served.
         self.assertTupleEqual(
             table_names,
             (
                 "exposure",
                 "visit1",
                 "visit1_quicklook",
+                "exposure_efd",
+                "visit1_efd",
             ),
         )
 
@@ -350,3 +359,128 @@ class TestNonFiniteRows(utils.RasTestCase):
         with patch.object(self.database, "fetch_data", return_value={"avg_1": [math.nan]}):
             result = self.database.query(["exposure.ra"], aggregator="avg")
         self.assertTrue(math.isnan(result["exposure.ra"]))
+
+
+class TestTransformedEfd(utils.RasTestCase):
+    """The transformed EFD tables, which live in a schema of their own.
+
+    In ConsDB `exposure_efd` and `visit1_efd` are in `efd_<instrument>`, not
+    `cdb_<instrument>`; the fixture attaches a second sqlite database under
+    `utils.EFD_SCHEMA_NAME` to reproduce that.
+    """
+
+    def test_efd_tables_are_reflected_from_their_own_schema(self):
+        self.assertEqual(self.database.get_table("exposure_efd").schema, utils.EFD_SCHEMA_NAME)
+        self.assertEqual(self.database.get_table("visit1_efd").schema, utils.EFD_SCHEMA_NAME)
+        self.assertIsNone(self.database.get_table("exposure").schema)
+
+    def test_efd_tables_belong_to_the_instrument(self):
+        # The client addresses a table by its instrument's database name, so
+        # the EFD tables report the ConsDB schema's, not their own.
+        data_id = self.database.get_data_id("exposure_efd")
+        self.assertEqual(data_id.database, self.schema["name"])
+        self.assertEqual(data_id.table, "exposure_efd")
+
+    def test_unpivoted_tables_are_not_served(self):
+        for table in ("exposure_efd_unpivoted", "visit1_efd_unpivoted"):
+            self.assertNotIn(table, self.database.tables)
+            self.assertNotIn(table, self.database.get_table_names())
+
+    def test_efd_columns_are_in_the_schema(self):
+        table = lras.database.get_table_schema(self.database.schema, "exposure_efd")
+        names = [column["name"] for column in table["columns"]]
+        self.assertIn("mount_jitter", names)
+        self.assertIn("created_at", names)
+
+    def test_query_joins_exposure_to_its_efd_row(self):
+        exposure = utils.get_test_data("exposure")
+        efd = utils.get_test_data("exposure_efd")
+        truth = astropy.table.join(
+            exposure, efd, keys_left="exposure.exposure_id", keys_right="exposure_efd.exposure_id"
+        )
+        has_ra = truth["exposure.ra"] != None  # noqa: E711
+        has_temperature = truth["exposure_efd.dome_temperature"] != None  # noqa: E711
+        truth = truth[has_ra & has_temperature]
+        truth = truth["exposure.ra", "exposure_efd.dome_temperature", "exposure.day_obs", "exposure.seq_num"]
+
+        data = self.database.query(columns=["exposure.ra", "exposure_efd.dome_temperature"])
+
+        self.assertDataTableEqual(data, truth)
+
+    def test_query_of_only_efd_columns_takes_data_ids_from_the_hub_table(self):
+        # The data ids come from visit1, so the visit1_efd rows for visits
+        # that visit1 has are returned, with visit1's day_obs and seq_num.
+        visits = utils.get_exposure_data_dict("visit1", "visit_id")
+        efd = utils.get_visit_efd_data_dict()
+        kept = [
+            n
+            for n, visit_id in enumerate(visits["visit1.visit_id"])
+            if visit_id in efd["visit1_efd.visit_id"]
+        ]
+
+        data = self.database.query(columns=["visit1_efd.sonic_temperature_mean"])
+
+        np.testing.assert_array_equal(
+            data["visit1_efd.sonic_temperature_mean"], efd["visit1_efd.sonic_temperature_mean"]
+        )
+        np.testing.assert_array_equal(data["day_obs"], [visits["visit1.day_obs"][n] for n in kept])
+        np.testing.assert_array_equal(data["seq_num"], [visits["visit1.seq_num"][n] for n in kept])
+
+    def test_query_joins_across_all_three(self):
+        # exposure_efd and visit1_efd only meet through the exposure/visit1
+        # hub tables, which the join builder has to find a path through.
+        data = self.database.query(
+            columns=["exposure_efd.mount_jitter", "visit1_efd.sonic_temperature_mean", "exposure.ra"]
+        )
+        efd = utils.get_visit_efd_data_dict()
+        exposures = utils.get_exposure_data_dict("exposure", "exposure_id")
+        expected = [
+            visit_id
+            for visit_id, ra in zip(exposures["exposure.exposure_id"], exposures["exposure.ra"])
+            if ra is not None and visit_id in efd["visit1_efd.visit_id"]
+        ]
+        self.assertEqual(len(data["exposure.ra"]), len(expected))
+
+    def test_count_of_efd_columns(self):
+        data = self.database.query(columns=["exposure_efd.dome_temperature"], aggregator="count")
+        self.assertEqual(data, {"exposure_efd.dome_temperature": 8})
+
+    def test_calculate_bounds_of_an_efd_column(self):
+        self.assertEqual(self.database.calculate_bounds("exposure_efd.mount_jitter"), (0.1, 1.0))
+
+    def test_verified_schema_drops_the_empty_efd_column(self):
+        schema = self.database.get_verified_schema()
+        table = lras.database.get_table_schema(schema, "exposure_efd")
+        names = [column["name"] for column in table["columns"]]
+        self.assertIn("mount_jitter", names)
+        self.assertNotIn("empty_metric", names)
+
+    def test_an_efd_table_missing_from_the_database_is_dropped(self):
+        # A connection with no EFD database attached: the instrument's own
+        # tables are still served and the EFD tables are simply absent.
+        path = os.path.dirname(__file__)
+        with open(os.path.join(path, "schema.yaml")) as file:
+            schema = yaml.safe_load(file)
+        schema["name"] = None
+        engine = sqlalchemy.create_engine("sqlite:///" + self.db_filename)
+        try:
+            database = lras.database.ConsDbSchema(
+                schema=schema,
+                engine=engine,
+                join_templates=self.database.joins.joins,
+                extra_schemas=[copy.deepcopy(self.efd_schema)],
+            )
+            self.assertTupleEqual(database.get_table_names(), ("exposure", "visit1", "visit1_quicklook"))
+            self.assertNotIn("exposure_efd", database.tables)
+        finally:
+            engine.dispose()
+
+    def test_without_extra_schemas_nothing_changes(self):
+        path = os.path.dirname(__file__)
+        with open(os.path.join(path, "schema.yaml")) as file:
+            schema = yaml.safe_load(file)
+        schema["name"] = None
+        database = lras.database.ConsDbSchema(
+            schema=schema, engine=self.database.engine, join_templates=self.database.joins.joins
+        )
+        self.assertTupleEqual(database.get_table_names(), ("exposure", "visit1", "visit1_quicklook"))

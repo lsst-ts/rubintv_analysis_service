@@ -72,3 +72,21 @@ joins:
         - ccdvisit_id
       ccdvisit1_quicklook:
         - ccdvisit_id
+
+  # exposure and exposure_efd. The transformed EFD tables live in the
+  # efd_<instrument> schema, alongside the instrument's cdb_<instrument>
+  # schema, and share its exposure and visit ids.
+  - type: inner
+    matches:
+      exposure:
+        - exposure_id
+      exposure_efd:
+        - exposure_id
+
+  # visit1 and visit1_efd
+  - type: inner
+    matches:
+      visit1:
+        - visit_id
+      visit1_efd:
+        - visit_id

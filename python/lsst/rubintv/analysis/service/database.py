@@ -25,6 +25,7 @@ import logging
 import math
 import threading
 import time
+from collections.abc import Sequence
 
 import sqlalchemy
 
@@ -40,13 +41,16 @@ logger = logging.getLogger("lsst.rubintv.analysis.service.database")
 VERIFIED_SCHEMA_TTL = 3600.0
 
 
-# Exposure tables currently in the schema
+# Exposure tables currently in the schema. `exposure_efd` is the transformed
+# EFD's per-exposure table, which lives in the instrument's efd_<instrument>
+# Postgres schema rather than its cdb_<instrument> one (see `ConsDbSchema`).
 exposure_tables = [
     "exposure",
     "exposure_quicklook",
     "ccdexposure",
     "ccdexposure_camera",
     "ccdexposure_quicklook",
+    "exposure_efd",
 ]
 
 # Tables in the schema for single visit exposures
@@ -55,6 +59,16 @@ visit1_tables = [
     "visit1_quicklook",
     "ccdvisit1",
     "ccdvisit1_quicklook",
+    "visit1_efd",
+]
+
+# Tables that are deliberately not served. The unpivoted transformed EFD
+# tables hold one (property, field, value) row per sensor reading rather than
+# one row per exposure, which the client's column model cannot show, and they
+# run to hundreds of millions of rows, so they must never be scanned.
+unsupported_tables = [
+    "exposure_efd_unpivoted",
+    "visit1_efd_unpivoted",
 ]
 
 # Flex tables in the schema.
@@ -291,43 +305,25 @@ class JoinBuilder:
         return select_from
 
 
-def _remove_schema_table(schema, table_name):
-    """Remove a table from the schema
-
-    We do this because the ConsDbSchema contains the tables and columns
-    that are sent to the DDV. So removing a table here ensures that
-    the DDV does not try to query a table that does not exist in the database.
-
-    Parameters
-    ----------
-    schema :
-        The schema to remove the table from.
-    table_name :
-        The name of the table to remove.
-
-    Returns
-    -------
-    result :
-        The schema with the table removed.
-    """
-    schema = schema.copy()
-    for table in schema["tables"]:
-        if table["name"] == table_name:
-            logger.warning(f"Removing table {table_name} from schema")
-            schema["tables"].remove(table)
-            break
-    return schema
-
-
 class ConsDbSchema:
     """A schema (instrument) in the consolidated database.
+
+    An instrument's tables can come from more than one Postgres schema: the
+    ConsDB proper is ``cdb_<instrument>``, and the transformed EFD adds
+    ``exposure_efd`` and ``visit1_efd`` in ``efd_<instrument>``. The extra
+    schemas' tables are reflected from their own Postgres schema and then
+    served as part of this one, so the client sees a single list of tables
+    for the instrument and can join across them like any others.
 
     Attributes
     ----------
     engine :
         The engine used to connect to the database.
     schema :
-        The schema yaml converted into a dict for the instrument.
+        The schema yaml converted into a dict for the instrument. After
+        construction its ``tables`` are only those the worker serves: tables
+        it does not implement or that are missing from the database are
+        dropped, and the extra schemas' tables are appended.
     metadata :
         The metadata for the database.
     joins :
@@ -346,6 +342,7 @@ class ConsDbSchema:
         schema: dict,
         join_templates: list,
         verified_schema_ttl: float = VERIFIED_SCHEMA_TTL,
+        extra_schemas: Sequence[dict] = (),
     ):
         self.engine = engine
         self.schema = schema
@@ -359,32 +356,65 @@ class ConsDbSchema:
         self._stop_refresh = threading.Event()
 
         self.tables = {}
-        schema_tables = self.schema["tables"].copy()
-        for table in schema_tables:
-            if (
-                table["name"] not in exposure_tables
-                and table["name"] not in visit1_tables
-                and table["name"] not in flex_tables
-            ):
-                # A new table was added to the schema and cannot be parsed
-                msg = f"Table {table['name']} has not been implemented in the RubinTV analysis service"
-                logger.warning(msg)
-                _remove_schema_table(self.schema, table["name"])
-            else:
-                try:
-                    self.tables[table["name"]] = sqlalchemy.Table(
-                        table["name"],
-                        self.metadata,
-                        autoload_with=self.engine,
-                        schema=schema["name"],
-                    )
-                except sqlalchemy.exc.NoSuchTableError:
-                    # The table is in sdm_schemas but has not yet been added
-                    # to the database.
-                    logger.warning(f"Table {table['name']} from schema not found in database")
-                    _remove_schema_table(self.schema, table["name"])
+        self.schema["tables"] = self._load_tables(schema["tables"], schema["name"])
+        for extra in extra_schemas:
+            self.schema["tables"].extend(self._load_tables(extra["tables"], extra["name"]))
 
         self.joins = JoinBuilder(self.tables, join_templates)
+
+    def _load_tables(self, tables: list[dict], schema_name: str | None) -> list[dict]:
+        """Reflect the tables of one Postgres schema that the worker serves.
+
+        Parameters
+        ----------
+        tables :
+            The ``tables`` entries of a schema yaml.
+        schema_name :
+            The Postgres schema to reflect them from, or `None` for the
+            connection's default (the sqlite test database).
+
+        Returns
+        -------
+        kept :
+            The entries of ``tables`` that were reflected, in order. The rest
+            are left out so that the client is never offered a table the
+            worker cannot query.
+        """
+        kept = []
+        for table in tables:
+            name = table["name"]
+            if name in unsupported_tables:
+                logger.info(f"Skipping table {name}, which the RubinTV analysis service does not serve")
+                continue
+            if name not in exposure_tables and name not in visit1_tables and name not in flex_tables:
+                # A new table was added to the schema and cannot be parsed
+                logger.warning(f"Table {name} has not been implemented in the RubinTV analysis service")
+                continue
+            if name in self.tables:
+                logger.warning(f"Table {name} is already loaded; ignoring the copy in {schema_name}")
+                continue
+            try:
+                self.tables[name] = sqlalchemy.Table(
+                    name,
+                    self.metadata,
+                    autoload_with=self.engine,
+                    schema=schema_name,
+                )
+            except sqlalchemy.exc.NoSuchTableError:
+                # The table is in the schema files but has not yet been added
+                # to the database.
+                logger.warning(f"Table {name} from schema not found in database")
+                continue
+            except sqlalchemy.exc.SQLAlchemyError as e:
+                # Reflection failed some other way: the whole schema is
+                # missing (a site without the transformed EFD service, say)
+                # or the worker's database user cannot read it. Either way
+                # the table cannot be served, and the rest of the instrument
+                # still can be.
+                logger.error(f"Table {name} in {schema_name} could not be read from the database: {e}")
+                continue
+            kept.append(table)
+        return kept
 
     def get_table_names(self) -> tuple[str, ...]:
         """Given a schema, return a list of dataset names
@@ -683,9 +713,10 @@ class ConsDbSchema:
         result :
             The ``(min, max)`` of the chosen column.
         """
-        table, column = column.split(".")
-        _table = sqlalchemy.Table(table, self.metadata, autoload_with=self.engine)
-        _column = _table.columns[column]
+        # The reflected table, which knows its Postgres schema; reflecting the
+        # name again here would look it up in the connection's search path,
+        # where neither the cdb_* nor the efd_* tables are.
+        _column = self.get_column(column)
 
         with self.engine.connect() as connection:
             query = sqlalchemy.select((sqlalchemy.func.min(_column)))

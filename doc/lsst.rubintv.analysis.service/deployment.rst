@@ -185,6 +185,42 @@ install directory by path instead.
 install needs outbound HTTPS to PyPI, which the pod has: the launcher already
 fetches this repository from GitHub at every start.
 
+Transformed EFD schema files
+----------------------------
+
+The transformed EFD tables, ``exposure_efd`` and ``visit1_efd``, are served as
+part of their instrument alongside the ConsDB tables, but they are a separate
+product with a separate source of truth:
+
+- In the database they live in their own Postgres schema, ``efd_latiss``,
+  ``efd_lsstcam`` and ``efd_lsstcomcam``, not in ``cdb_<instrument>``. The
+  worker reflects them from there and the client sees them as more tables of
+  the instrument, joined to ``exposure`` on ``exposure_id`` and to ``visit1``
+  on ``visit_id`` (``scripts/joins.yaml``).
+- Their schema files come from the ``lsst-dm/consdb`` repository on GitHub,
+  whose transformed EFD service creates the tables from them. The copies in
+  ``lsst-sdm-schemas`` are synced by hand and have lagged the database by more
+  than a hundred columns for LSSTCam, so they are not used. There is no PyPI
+  release of consdb, so the worker fetches the raw files at the git tag pinned
+  as ``consdb_version`` in ``config.yaml`` into
+  ``/tmp/rubintv-ddv/consdb_efd_schemas/<tag>`` and reuses them on later
+  restarts. The files for each instrument are listed under ``efd_schemas:``,
+  keyed by the ConsDB schema they belong to.
+- The transformed EFD service runs only at USDF, so at the summit and base the
+  ``efd_*`` schemas may not exist. That is handled the same way as a ConsDB
+  table that is in the schema files but not yet in the database: the table is
+  logged and left out, and the instrument is served without it.
+- The ``*_unpivoted`` tables in those schemas are never served. They hold one
+  row per sensor reading and run to hundreds of millions of rows.
+
+The lookup order is ``--efd-schemas-dir``, then the pinned ``consdb_version``.
+There is no fallback: if the fetch fails the worker logs the error, warns that
+it is serving without the transformed EFD tables, and carries on.
+
+**To pick up new EFD columns**, change ``consdb_version`` to a newer tag from
+https://github.com/lsst-dm/consdb/tags, push to the deploy branch, and restart
+the pod.
+
 Connecting to the web app
 =========================
 
@@ -279,6 +315,18 @@ under ``schemas:`` in ``config.yaml``. With ``--schemas-dir`` or the
 **Tables or columns missing from the frontend that exist in ConsDB.** The
 schemas in use predate the change. Look for the fallback warning above in the
 startup log, otherwise bump ``sdm_schemas_version``.
+
+**Could not fetch the transformed EFD schemas from lsst-dm/consdb ...** GitHub
+was unreachable or the pinned ``consdb_version`` is not a tag of that
+repository. The worker logs ``Serving without the transformed EFD tables`` and
+runs without ``exposure_efd`` and ``visit1_efd`` until a restart succeeds.
+
+**exposure_efd or visit1_efd missing from the frontend.** Either the fetch
+above failed, or the site's ConsDB has no ``efd_<instrument>`` schema (only
+USDF has the transformed EFD service), in which case the startup log shows
+``Table exposure_efd from schema not found in database``. Columns missing from
+those tables that exist in the database mean the pinned ``consdb_version``
+predates them; bump it.
 
 **Butler connection errors, worker still running.** Butler failures are caught
 and logged rather than fatal, so the worker runs in a degraded state. This will

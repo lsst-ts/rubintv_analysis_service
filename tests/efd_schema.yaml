@@ -1,0 +1,71 @@
+---
+name: efd_testdb
+"@id": "#efd_testdb"
+description: Small transformed EFD schema for testing the package. In ConsDB
+  these tables live in their own efd_<instrument> Postgres schema; the tests
+  attach a second sqlite database under this name to stand in for that.
+tables:
+  - name: exposure_efd
+    index_columns:
+      - exposure_id
+    columns:
+      - name: day_obs
+        datatype: long
+        description: Day of observation as an integer, YYYYMMDD.
+      - name: seq_num
+        datatype: long
+        description: Sequence number
+      - name: exposure_id
+        datatype: long
+        description: Unique identifier for the exposure.
+      - name: created_at
+        datatype: timestamp
+        description: When the row was written.
+      - name: mount_jitter
+        datatype: float
+        description: RMS of the mount position during the exposure.
+      - name: dome_temperature
+        datatype: float
+        description: Mean dome temperature during the exposure.
+      - name: empty_metric
+        datatype: float
+        description: A column no row has a value for.
+  - name: exposure_efd_unpivoted
+    columns:
+      - name: day_obs
+        datatype: long
+        description: Day of observation as an integer, YYYYMMDD.
+      - name: seq_num
+        datatype: long
+        description: Sequence number
+      - name: exposure_id
+        datatype: long
+        description: Unique identifier for the exposure.
+      - name: property
+        datatype: char
+        description: The telemetry property.
+      - name: field
+        datatype: char
+        description: The sensor the value is from.
+      - name: value
+        datatype: float
+        description: The value.
+  - name: visit1_efd
+    index_columns:
+      - visit_id
+    columns:
+      - name: day_obs
+        datatype: long
+        description: Day of observation as an integer, YYYYMMDD.
+      - name: seq_num
+        datatype: long
+        description: Sequence number
+      - name: visit_id
+        datatype: long
+        description: Unique identifier for the visit.
+      - name: created_at
+        datatype: timestamp
+        description: When the row was written.
+      - name: sonic_temperature_mean
+        datatype: float
+        description: Mean sonic temperature during the visit.

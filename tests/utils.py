@@ -43,7 +43,12 @@ datatype_transform = {
     "char": "text",
     "date": "text",
     "datetime": "text",
+    "timestamp": "text",
 }
+
+# The name the tests attach the transformed EFD database under, standing in
+# for the efd_<instrument> Postgres schema.
+EFD_SCHEMA_NAME = "efd_testdb"
 
 # Convert DataID columns
 dataid_transform = {
@@ -132,10 +137,48 @@ def get_visit_data_dict() -> dict:
     }
 
 
+def get_exposure_efd_data_dict() -> dict:
+    """Get a dictionary containing the exposure_efd test data.
+
+    One row per exposure, matched to the exposure table by ``exposure_id``.
+    ``day_obs`` is an integer as it is in the real transformed EFD tables,
+    unlike the date string the test exposure table uses, and ``empty_metric``
+    never has a value so the verified schema drops it.
+    """
+    return {
+        "exposure_efd.day_obs": [20230519] * 5 + [20230214] * 5,
+        "exposure_efd.seq_num": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+        "exposure_efd.exposure_id": [2, 4, 6, 8, 10, 12, 14, 16, 18, 20],
+        "exposure_efd.created_at": ["2023-05-20 00:00:00"] * 5 + ["2023-02-15 00:00:00"] * 5,
+        "exposure_efd.mount_jitter": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+        "exposure_efd.dome_temperature": [10.5, None, 11.5, 12.0, None, 5.0, 5.5, 6.0, 6.5, 7.0],
+        "exposure_efd.empty_metric": [None] * 10,
+    }
+
+
+def get_visit_efd_data_dict() -> dict:
+    """Get a dictionary containing the visit1_efd test data.
+
+    Deliberately missing two of the visits (ids 6 and 16), so that a join to
+    it drops rows.
+    """
+    return {
+        "visit1_efd.day_obs": [20230519] * 4 + [20230214] * 4,
+        "visit1_efd.seq_num": [0, 1, 3, 4, 5, 6, 8, 9],
+        "visit1_efd.visit_id": [2, 4, 8, 10, 12, 14, 18, 20],
+        "visit1_efd.created_at": ["2023-05-20 00:00:00"] * 4 + ["2023-02-15 00:00:00"] * 4,
+        "visit1_efd.sonic_temperature_mean": [1.0, 2.0, 4.0, 5.0, 6.0, 7.0, 9.0, 10.0],
+    }
+
+
 def get_test_data(table: str) -> ApTable:
     """Generate data for the test database"""
     if table == "exposure":
         data_dict = get_exposure_data_dict("exposure", "exposure_id")
+    elif table == "exposure_efd":
+        data_dict = get_exposure_efd_data_dict()
+    elif table == "visit1_efd":
+        data_dict = get_visit_efd_data_dict()
     else:
         data_dict = get_visit_data_dict()
 
@@ -180,6 +223,34 @@ def create_database(schema: dict, db_filename: str):
         cursor.close()
 
 
+def create_efd_database(schema: dict, db_filename: str):
+    """Create the test transformed EFD database.
+
+    A separate sqlite file, attached to the main connection under
+    `EFD_SCHEMA_NAME`, so that the tables are reflected from a schema other
+    than the default just as they are in ConsDB. Tables the worker does not
+    serve (the unpivoted ones) are created empty.
+    """
+    connection = sqlite3.connect(db_filename)
+    cursor = connection.cursor()
+    for table in schema["tables"]:
+        create_table(cursor, table["name"], table["columns"])
+
+        if table["name"] == "exposure_efd":
+            data = get_exposure_efd_data_dict()
+        elif table["name"] == "visit1_efd":
+            data = get_visit_efd_data_dict()
+        else:
+            continue
+
+        for row in zip(*data.values()):
+            value_str = "?, " * (len(row) - 1) + "?"
+            cursor.execute(f"INSERT INTO {table['name']} VALUES({value_str});", row)
+    connection.commit()
+    cursor.close()
+    connection.close()
+
+
 class TableMismatchError(AssertionError):
     pass
 
@@ -211,8 +282,22 @@ class RasTestCase(TestCase):
         self.db_filename = db_file.name
         self.schema = schema
 
+        # The transformed EFD schema, a second database attached to every
+        # connection under its schema name, which is how sqlite addresses a
+        # table as `efd_testdb.exposure_efd` the way Postgres does.
+        with open(os.path.join(path, "efd_schema.yaml")) as file:
+            efd_schema = yaml.safe_load(file)
+        efd_db_file = tempfile.NamedTemporaryFile(delete=False)
+        create_efd_database(efd_schema, efd_db_file.name)
+        self.efd_db_file = efd_db_file
+        self.efd_schema = efd_schema
+
         # Set up the sqlalchemy connection
         engine = sqlalchemy.create_engine("sqlite:///" + db_file.name)
+
+        @sqlalchemy.event.listens_for(engine, "connect")
+        def attach_efd(dbapi_connection, connection_record):
+            dbapi_connection.execute(f"ATTACH DATABASE '{efd_db_file.name}' AS {EFD_SCHEMA_NAME}")
 
         # Load the table joins
         joins_path = os.path.join(path, "joins.yaml")
@@ -223,7 +308,9 @@ class RasTestCase(TestCase):
         # query log a test triggers is written there rather than into the
         # working directory.
         self.user_dir = tempfile.mkdtemp()
-        self.database = ConsDbSchema(schema=schema, engine=engine, join_templates=joins)
+        self.database = ConsDbSchema(
+            schema=schema, engine=engine, join_templates=joins, extra_schemas=[efd_schema]
+        )
         self.data_center = DataCenter(schemas={"testdb": self.database}, user_path=self.user_dir)
 
         # The query logger opens its file lazily, part way through whichever
@@ -241,6 +328,8 @@ class RasTestCase(TestCase):
 
         self.db_file.close()
         os.remove(self.db_file.name)
+        self.efd_db_file.close()
+        os.remove(self.efd_db_file.name)
 
         # Clean up any persistent loggers
         cleanup_persistent_logger()

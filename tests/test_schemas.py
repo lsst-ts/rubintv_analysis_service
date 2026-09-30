@@ -19,10 +19,12 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import io
 import os
 import subprocess
 import sys
 import tempfile
+import urllib.error
 from unittest import TestCase
 
 from lsst.rubintv.analysis.service import schemas
@@ -115,3 +117,95 @@ class TestResolveSchemasDir(TestCase):
     def test_nothing_configured_raises(self):
         with self.assertRaises(schemas.SchemaLookupError):
             schemas.resolve_schemas_dir(None, environ={}, root=self.root)
+
+
+TAG = "26.9.1"
+EFD_FILES = ["efd_latiss.yaml", "efd_lsstcam.yaml"]
+
+
+def fake_opener():
+    """A stand-in for urlopen that serves a small yaml naming the file.
+
+    Records each URL so tests can check what would have been fetched.
+    """
+    calls: list[str] = []
+
+    def opener(url):
+        calls.append(url)
+        filename = url.rsplit("/", 1)[1]
+        return io.BytesIO(f"name: {filename}\n".encode())
+
+    return opener, calls
+
+
+def failing_opener(url):
+    raise urllib.error.URLError("no network")
+
+
+class TestResolveEfdSchemasDir(TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = os.path.join(self.tmp.name, "root")
+        self.expected = os.path.join(self.root, TAG)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def resolve(self, opener, version=TAG, filenames=EFD_FILES, explicit=None):
+        return schemas.resolve_efd_schemas_dir(
+            version, filenames, explicit=explicit, root=self.root, opener=opener
+        )
+
+    def test_explicit_dir_wins(self):
+        opener, calls = fake_opener()
+        self.assertEqual(self.resolve(opener, explicit="/somewhere"), "/somewhere")
+        self.assertEqual(calls, [])
+
+    def test_fetches_pinned_tag_from_consdb(self):
+        opener, calls = fake_opener()
+        self.assertEqual(self.resolve(opener), self.expected)
+        self.assertEqual(
+            calls,
+            [
+                "https://raw.githubusercontent.com/lsst-dm/consdb/26.9.1"
+                f"/python/lsst/consdb/transformed_efd/schemas/yml/{filename}"
+                for filename in EFD_FILES
+            ],
+        )
+        for filename in EFD_FILES:
+            with open(os.path.join(self.expected, filename)) as file:
+                self.assertEqual(file.read(), f"name: {filename}\n")
+        self.assertEqual(sorted(os.listdir(self.expected)), sorted(EFD_FILES))
+
+    def test_reuses_fetched_files(self):
+        opener, calls = fake_opener()
+        self.resolve(opener)
+        self.assertEqual(self.resolve(opener), self.expected)
+        self.assertEqual(len(calls), len(EFD_FILES))
+
+    def test_completes_a_partial_fetch(self):
+        # One file is already there, from a fetch that failed part way.
+        os.makedirs(self.expected)
+        with open(os.path.join(self.expected, EFD_FILES[0]), "w") as file:
+            file.write("name: kept\n")
+        opener, calls = fake_opener()
+        self.assertEqual(self.resolve(opener), self.expected)
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(calls[0].endswith(EFD_FILES[1]))
+        with open(os.path.join(self.expected, EFD_FILES[0])) as file:
+            self.assertEqual(file.read(), "name: kept\n")
+
+    def test_fetch_failure_returns_none(self):
+        self.assertIsNone(self.resolve(failing_opener))
+        # Nothing half-written is left to be mistaken for a schema file later.
+        self.assertFalse(os.path.exists(os.path.join(self.expected, EFD_FILES[0])))
+
+    def test_no_version_returns_none(self):
+        opener, calls = fake_opener()
+        self.assertIsNone(self.resolve(opener, version=None))
+        self.assertEqual(calls, [])
+
+    def test_no_files_returns_none(self):
+        opener, calls = fake_opener()
+        self.assertIsNone(self.resolve(opener, filenames=[]))
+        self.assertEqual(calls, [])

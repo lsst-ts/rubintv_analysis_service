@@ -32,7 +32,7 @@ from lsst.rubintv.analysis.service.commands.db import warm_cameras
 from lsst.rubintv.analysis.service.data import DataCenter, DataMatch
 from lsst.rubintv.analysis.service.database import ConsDbSchema
 from lsst.rubintv.analysis.service.efd import EfdClient
-from lsst.rubintv.analysis.service.schemas import resolve_schemas_dir
+from lsst.rubintv.analysis.service.schemas import resolve_efd_schemas_dir, resolve_schemas_dir
 from lsst.rubintv.analysis.service.utils import ServerFormatter
 from lsst.rubintv.analysis.service.worker import DEFAULT_WS_PATH, Worker
 
@@ -65,6 +65,11 @@ class LocationConfig:
     sdm_schemas_version : str | None
         The version of the ``lsst-sdm-schemas`` package those files come
         from, or `None` to read them from an ``$SDM_SCHEMAS_DIR`` checkout.
+    efd_schemas : dict[str, str]
+        The transformed EFD schema yaml file served as part of each ConsDB
+        schema, keyed by the ConsDB schema's name. Empty when none are.
+    consdb_version : str | None
+        The ``lsst-dm/consdb`` git tag those files are fetched from.
     """
 
     users_path: str
@@ -73,6 +78,8 @@ class LocationConfig:
     butlers: list[str]
     schemas: dict[str, str]
     sdm_schemas_version: str | None
+    efd_schemas: dict[str, str]
+    consdb_version: str | None
     efd_url: str | None
 
     def __init__(self, location: str, yaml_config: dict[str, Any]):
@@ -95,6 +102,9 @@ class LocationConfig:
         self.schemas = yaml_config["schemas"]
         version = yaml_config.get("sdm_schemas_version")
         self.sdm_schemas_version = None if version is None else str(version)
+        self.efd_schemas = yaml_config.get("efd_schemas") or {}
+        version = yaml_config.get("consdb_version")
+        self.consdb_version = None if version is None else str(version)
 
 
 def main():
@@ -123,6 +133,13 @@ def main():
         type=str,
         help="Directory holding the ConsDB schema yaml files. Overrides the lsst-sdm-schemas "
         "version pinned in the config file, which is otherwise installed on demand.",
+    )
+    parser.add_argument(
+        "--efd-schemas-dir",
+        default=None,
+        type=str,
+        help="Directory holding the transformed EFD schema yaml files (efd_*.yaml). Overrides the "
+        "lsst-dm/consdb tag pinned as consdb_version in the config file.",
     )
     parser.add_argument(
         "-l",
@@ -227,11 +244,31 @@ def main():
 
     schemas_dir = resolve_schemas_dir(config.sdm_schemas_version, explicit=args.schemas_dir)
     logger.info(f"Reading the ConsDB schemas from {schemas_dir}")
+
+    # The transformed EFD tables are served as part of their instrument's
+    # schema. They are optional: without their files the instruments are
+    # served without them, which is logged, rather than not at all.
+    efd_schemas_dir = resolve_efd_schemas_dir(
+        config.consdb_version, config.efd_schemas.values(), explicit=args.efd_schemas_dir
+    )
+    if efd_schemas_dir is None:
+        if config.efd_schemas:
+            logger.warning("Serving without the transformed EFD tables")
+    else:
+        logger.info(f"Reading the transformed EFD schemas from {efd_schemas_dir}")
+
     for name, filename in config.schemas.items():
         full_path = os.path.join(schemas_dir, filename)
         with open(full_path, "r") as file:
             schema = yaml.safe_load(file)
-            schemas[name] = ConsDbSchema(schema=schema, engine=engine, join_templates=joins)
+        extra_schemas = []
+        efd_filename = config.efd_schemas.get(name)
+        if efd_schemas_dir is not None and efd_filename is not None:
+            with open(os.path.join(efd_schemas_dir, efd_filename), "r") as file:
+                extra_schemas.append(yaml.safe_load(file))
+        schemas[name] = ConsDbSchema(
+            schema=schema, engine=engine, join_templates=joins, extra_schemas=extra_schemas
+        )
 
     # Do the work "load instrument" would otherwise do lazily: verify the
     # schemas and load the camera geometry. The worker is not serving anyone
