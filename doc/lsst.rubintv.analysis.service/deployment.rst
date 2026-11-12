@@ -266,10 +266,12 @@ request and one response per job. Only the path moved.
 Failure modes
 =============
 
-A worker that cannot connect exits **1** with a ``WorkerConnectionError``. This
-is deliberate: under the pod's ``restartPolicy: Always`` a zero exit is
-indistinguishable from a clean shutdown, so a misconfigured worker would
-restart silently and forever rather than surfacing as a failure.
+A worker that cannot connect exits **1**: with a ``WorkerConnectionError`` if
+it cannot reach the web app, or a ``DatabaseConnectionError`` if it cannot
+reach the ConsDB at startup. This is deliberate: under the pod's
+``restartPolicy: Always`` a zero exit is indistinguishable from a clean
+shutdown, so a misconfigured worker would restart silently and forever rather
+than surfacing as a failure.
 
 Diagnosing a worker pod
 -----------------------
@@ -294,6 +296,25 @@ routes the frontend actually registers.
 ``/etc/secrets/postgres-credentials.txt`` matches both the site's ConsDB host
 and the ``--database`` name. Check the mounted secret and the host in
 ``config.yaml``.
+
+**DatabaseConnectionError: Could not connect to ...** The worker found its
+credentials but could not open a connection to the ConsDB. It reads the tables
+from the database only once, at startup, and could not serve ConsDB data
+without them, so it exits, and Kubernetes keeps restarting it, with a back-off
+of up to five minutes, until the database can be reached. The end of
+the message gives the cause. ``No route to host``, ``Connection refused`` or a
+timeout mean the host or the network path to it is down, not the worker. The
+restarting worker cannot be ``exec``'d into, so test from another pod in the
+namespace, such as the frontend:
+
+.. code-block:: bash
+
+   kubectl exec <frontend-pod> -n rubintv -- python -c "import socket; socket.create_connection(('<consdb-host>', 5432), 5); print('ok')"
+
+and from outside the cluster (an SDF login node at USDF). If it fails from
+both, the database is down; if only from inside the cluster, look at its
+network policy or egress. ``password authentication failed`` means the secret
+is out of date.
 
 **Could not install lsst-sdm-schemas==...** pip could not reach PyPI, or the
 pinned version does not exist there. The worker falls back to

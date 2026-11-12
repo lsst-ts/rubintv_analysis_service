@@ -158,6 +158,38 @@ def get_table_schema(schema: dict, table: str) -> dict:
     raise UnrecognizedTableError("Could not find the table '{table}' in database")
 
 
+class DatabaseConnectionError(RuntimeError):
+    """The worker could not connect to the database at startup."""
+
+
+def check_connection(engine: sqlalchemy.engine.Engine) -> None:
+    """Raise unless a connection to the database can be opened.
+
+    `ConsDbSchema` reflects each table once, when it is built, so a worker
+    that cannot reach the database at startup has no way to serve ConsDB data
+    later, even once the database is back. Checking before the schemas are
+    built stops such a worker with one clear error, ahead of any slow setup,
+    so that it exits non-zero and Kubernetes restarts it until the database
+    can be reached.
+
+    Parameters
+    ----------
+    engine :
+        The engine the schemas will be reflected with.
+
+    Raises
+    ------
+    DatabaseConnectionError
+        Raised if no connection could be opened.
+    """
+    try:
+        with engine.connect():
+            pass
+    except sqlalchemy.exc.OperationalError as e:
+        url = engine.url.render_as_string(hide_password=True)
+        raise DatabaseConnectionError(f"Could not connect to {url}: {str(e.orig).strip()}") from e
+
+
 class JoinError(Exception):
     """An error that occurs when a join cannot be made between two tables"""
 

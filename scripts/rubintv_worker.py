@@ -30,7 +30,7 @@ import yaml
 from lsst.daf.butler import Butler
 from lsst.rubintv.analysis.service.commands.db import warm_cameras
 from lsst.rubintv.analysis.service.data import DataCenter, DataMatch
-from lsst.rubintv.analysis.service.database import ConsDbSchema
+from lsst.rubintv.analysis.service.database import ConsDbSchema, check_connection
 from lsst.rubintv.analysis.service.efd import EfdClient
 from lsst.rubintv.analysis.service.schemas import resolve_efd_schemas_dir, resolve_schemas_dir
 from lsst.rubintv.analysis.service.utils import ServerFormatter
@@ -238,6 +238,9 @@ def main():
         raise ValueError(f"Could not find credentials for {config.consdb} and {args.database}")
     database_url = f"postgresql://{user}:{password}@{config.consdb}/{database}"
     engine = sqlalchemy.create_engine(database_url)
+    # Tables are reflected once, below, so a worker that cannot reach the
+    # database now could never serve them. Stop with a clear error instead.
+    check_connection(engine)
 
     # Initialize the data center that provides access to various data sources
     schemas: dict[str, ConsDbSchema] = {}
